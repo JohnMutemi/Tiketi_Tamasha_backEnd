@@ -21,13 +21,14 @@ class User(db.Model, SerializerMixin):
     role = db.Column(db.String(20), nullable=False)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
 
-    events = db.relationship('Event', backref='organizer', lazy=True)
-    tickets = db.relationship('Ticket', backref='customer', lazy=True)
+    events = db.relationship('Event', backref='organizer')
+    tickets = db.relationship('Ticket', backref='customer')
 
     serialize_rules = ('-_password_hash', '-events.organizer', '-tickets.customer')
+
     def __repr__(self):
-        return f'<User {self.username}'
-    
+        return f'<User {self.username}>'
+
     @property
     def password_hash(self):
         return self._password_hash
@@ -41,27 +42,30 @@ class User(db.Model, SerializerMixin):
 
     def check_password(self, password):
         return check_password_hash(self._password_hash, password)
+
     @validates('username')
     def validate_username(self, key, username):
         if not username:
             raise ValueError("Username cannot be empty")
-        if len(username)>50:
+        if len(username) > 50:
             raise ValueError("Username must be 50 characters or less")
         return username
+
     @validates('email')
-    def validates_email(self, key, email):
+    def validate_email(self, key, email):
         if not email:
             raise ValueError("Email cannot be empty")
-        if len(email)>120:
+        if len(email) > 120:
             raise ValueError('Email must be 120 characters or less')
         return email
+
     def to_dict(self):
-        return{
-            'id':self.id,
+        return {
+            'id': self.id,
             'username': self.username,
             'email': self.email,
             'role': self.role,
-            'created_at':self.created_at,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
         }
 
 class Event(db.Model, SerializerMixin):
@@ -77,8 +81,8 @@ class Event(db.Model, SerializerMixin):
     remaining_tickets = db.Column(db.Integer, nullable=False)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
 
-    tickets = db.relationship('Ticket', backref='event', lazy=True)
-    event_categories = db.relationship('EventCategory', backref='event', lazy=True)
+    tickets = db.relationship('Ticket', backref='event')
+    event_categories = db.relationship('EventCategory', backref='event')
 
     serialize_rules = ('-tickets.event', '-event_categories.event')
 
@@ -93,7 +97,7 @@ class Ticket(db.Model, SerializerMixin):
     quantity = db.Column(db.Integer, nullable=False)
     status = db.Column(db.String(20), nullable=False)
 
-    payments = db.relationship('Payment', backref='ticket', lazy=True)
+    payments = db.relationship('Payment', backref='ticket')
 
     serialize_rules = ('-event.tickets', '-customer.tickets', '-payments.ticket')
 
@@ -113,7 +117,7 @@ class Category(db.Model, SerializerMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), unique=True, nullable=False)
 
-    event_categories = db.relationship('EventCategory', backref='category', lazy=True)
+    event_categories = db.relationship('EventCategory', backref='category')
 
     serialize_rules = ('-event_categories.category',)
 
@@ -123,3 +127,11 @@ class EventCategory(db.Model, SerializerMixin):
     category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), primary_key=True)
 
     serialize_rules = ('-event.event_categories', '-category.event_categories')
+
+class RevokedToken(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    jti = db.Column(db.String(120), unique=True, nullable=False)
+    revoked_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __init__(self, jti):
+        self.jti = jti

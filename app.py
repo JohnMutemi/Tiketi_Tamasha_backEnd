@@ -4,7 +4,8 @@ from flask import Flask, request, jsonify, make_response, session, url_for,  ren
 from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_restful import Api, Resource
-from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
+from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, get_jwt
+from flask_jwt_extended.exceptions import RevokedTokenError
 from werkzeug.exceptions import NotFound
 from datetime import timedelta, datetime
 
@@ -17,7 +18,7 @@ app.config["SECRET_KEY"] = "JKSRVHJVFBSRDFV" + str(random.randint(1, 10000000000
 app.json.compact = False
 api = Api(app)
 
-from models import db, User, Event, Category, EventCategory, Payment, Ticket
+from models import db, User, Event, Category, EventCategory, Payment, Ticket, RevokedToken
 db.init_app(app)
 jwt = JWTManager(app)
 migrate=Migrate(app, db)
@@ -33,6 +34,7 @@ def handle_not_found(e):
     return response
 
 app.register_error_handler(404, handle_not_found)
+
 
 @app.route('/sessions/<string:key>', methods=['GET'])
 def show_cookies(key):
@@ -61,7 +63,49 @@ class UserResource(Resource):
             return {'error': 'User not found'}, 404
         users = User.query.all()
         return [user.to_dict() for user in users], 200
+     
+    def delete(self, user_id):
+        user = User.query.get(user_id)
+        if not user:
+            return {'error': 'User not found'}, 404
+        
+        try:
+            db.session.delete(user)
+            db.session.commit()
+            return {'message': 'User deleted successfully'}, 200
+        except Exception as e:
+            print(f"Error occurred during user deletion: {e}")
+            return {'message': 'Internal server error'}, 500
+    def put(self, user_id):
+        user = User.query.get(user_id)
+        if not user:
+            return {'error': 'User not found'}, 404
+        
+        username = request.form.get('username')
+        password = request.form.get('password')
+        email = request.form.get('email')
+        role = request.form.get('role')
+
+        if username:
+            user.username = username
+        if password:
+            user.set_password(password)
+        if email:
+            user.email = email
+        if role:
+            if role not in ['event_organizer', 'customer']:
+                return {'message': 'Invalid role. Choose either "event_organizer" or "customer"'}, 400
+            user.role = role
+
+        try:
+            db.session.commit()
+            return {'message': 'User updated successfully'}, 200
+        except Exception as e:
+            print(f"Error occurred during user update: {e}")
+            return {'message': 'Internal server error'}, 500
+
 class Login(Resource):
+
     def post(self):
         username = request.form.get('username')
         password = request.form.get('password')
@@ -83,15 +127,13 @@ class Login(Resource):
             return {"error": "Invalid username or password"}, 401
 class Register(Resource):
     def post(self):
-        # Print the incoming data to check if the request data is being received
         print(f"Received data: {request.form}")
 
         username = request.form.get('username')
         password = request.form.get('password')
         email = request.form.get('email')
-        role=request.form.get('role')
+        role = request.form.get('role')
 
-        # Print the extracted values to ensure they are correctly extracted
         print(f"Extracted - Username: {username}, Email: {email}, Role: {role}, Password: {password}")
 
         if not username or not password or not email or not role:
@@ -99,15 +141,14 @@ class Register(Resource):
             return {'message': 'username, password, role, and email are required'}, 400
         if role not in ['event_organizer', 'customer']:
             print('Invalid role provided')
-            return {'message': 'Invalid role. Choose either "event_organizer"  or "customer"'}
-        # Check if the user already exist
+            return {'message': 'Invalid role. Choose either "event_organizer" or "customer"'}, 400
+        
         existing_user = User.query.filter_by(username=username).first()
         if existing_user:
             print(f"User already exists: {existing_user.username}")
             return {'message': 'User already exists'}, 400
 
         try:
-            # Attempt to create a new user
             new_user = User(username=username, email=email, role=role)
             new_user.set_password(password)
             db.session.add(new_user)
@@ -123,15 +164,116 @@ class Register(Resource):
             print(f"Error occurred during registration: {e}")
             return {'message': 'Internal server error'}, 500
 
+class EventsList(Resource):
+    def get(self):
+        events = Event.query.all()
+        event_list = []
+
+        for event in events:
+            tickets = Ticket.query.filter_by(event_id=event.id).all()
+            event_list.append({
+                'id': event.id,
+                'title': event.title,
+                'description': event.description,
+                'location': event.location,
+                'start_time': event.start_time,
+                'end_time': event.end_time,
+                'total_tickets': event.total_tickets,
+                'remaining_tickets': event.remaining_tickets,
+                'tickets': [{'ticket_type': t.ticket_type, 'price': t.price, 'quantity': t.quantity, 'status': t.status} for t in tickets]
+            })
+
+        return jsonify(event_list)
+class OrganizerDashboard(Resource):
+    @jwt_required()
+    def get(self):
+        user_id = get_jwt_identity()['user_id']
+        user = User.query.get(user_id)
+
+        if not user:
+            return {'message': 'User not found'}, 404
+
+        if user.role != 'event_organizer':
+            return {'message': 'Access denied'}, 403
+
+        events = Event.query.filter_by(organizer_id=user.id).all()
+        dashboard_data = []
+
+        for event in events:
+            tickets = Ticket.query.filter_by(event_id=event.id).all()
+            total_tickets = sum(ticket.quantity for ticket in tickets)
+            remaining_tickets = event.remaining_tickets
+
+            dashboard_data.append({
+                'event_id': event.id,
+                'event_title': event.title,
+                'total_tickets': total_tickets,
+                'remaining_tickets': remaining_tickets,
+                'attendees': [{'username': User.query.get(t.user_id).username, 'ticket_type': t.ticket_type, 'quantity': t.quantity} for t in tickets]
+            })
+
+        return jsonify(dashboard_data)
+    
+# Handle logout operation
+revoked_tokens = set()  # Consider using a database for persistence
+
+@jwt.token_in_blocklist_loader
+def check_if_token_revoked(jwt_header, jwt_payload):
+    jti = jwt_payload['jti']
+    token = RevokedToken.query.filter_by(jti=jti).first()
+    return token is not None
+
 class Logout(Resource):
+    @jwt_required()
     def post(self):
-        session.pop('user_id', None)
-        return jsonify({"message": "Logout successful"})
+        jti = get_jwt()['jti']
+        revoked_token = RevokedToken(jti=jti)
+        db.session.add(revoked_token)
+        db.session.commit()
+        session.clear()
+        response_data = {"message": "Logout successful"}
+        print("Response Data:", response_data)  # Debugging output
+        return response_data, 200
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    response = {
+        "message": "An unexpected error occurred.",
+        "error": str(e)
+    }
+    print("Exception occurred:", e)  # Debugging output
+    print("Response Data:", response)  # Debugging output
+    return jsonify(response), 500
+
+class CheckSession(Resource):
+    def get(self):
+        user_id = session.get('user_id')
+        print("Session user_id:", user_id)  # Debugging output
+        
+        if not user_id:
+            error_response = {"error": "No active session"}
+            print("Error Response:", error_response)  # Debugging output
+            return jsonify(error_response), 401
+
+        user = User.query.get(user_id)
+        if user:
+            user_data = user.to_dict()
+            print("User Data:", user_data)  # Debugging output
+            return jsonify(user_data), 200
+        
+        error_response = {"error": "User not found"}
+        print("Error Response:", error_response)  # Debugging output
+        return jsonify(error_response), 404
+
 # API endpoints
 
 api.add_resource(UserResource, '/users', '/users/<int:user_id>')
 api.add_resource(Login, '/login')
+api.add_resource(CheckSession, '/session')
 api.add_resource(Logout, '/logout')
 api.add_resource(Register, '/register')
+api.add_resource(EventsList, '/events')
+api.add_resource( OrganizerDashboard, '/organizer/dashboard')
+
 if __name__ == '__main__':
     app.run(port=5555, debug=True)
