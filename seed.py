@@ -6,20 +6,39 @@ def seed_data():
     with app.app_context():
         # Drop existing tables and create new ones
         db.drop_all()
-        
         db.create_all()
 
         # Clear session
         db.session.remove()
+                # Create Users with plaintext passwords (only for testing, not for production)
+        organizer1 = User(username='janedoe', email='janedoe@example.com', role='organizer')
+        organizer1.set_password('securepass')
 
-        # Create Users
-        admin = User(username='admin', email='admin@example.com', _password_hash='hashedpassword', role='admin')
-        organizer = User(username='organizer', email='organizer@example.com', _password_hash='hashedpassword', role='organizer')
-        customer = User(username='customer', email='customer@example.com', _password_hash='hashedpassword', role='customer')
+        organizer2 = User(username='michaelsmith', email='michaelsmith@example.com', role='organizer')
+        organizer2.set_password('michaelpass')
 
-        db.session.add(admin)
-        db.session.add(organizer)
-        db.session.add(customer)
+        customer1 = User(username='emilybrown', email='emilybrown@example.com', role='customer')
+        customer1.set_password('emilypass')
+
+        customer2 = User(username='davidjohnson', email='davidjohnson@example.com', role='customer')
+        customer2.set_password('davidpass')
+
+        customer3 = User(username='sarahjones', email='sarahjones@example.com', role='customer')
+        customer3.set_password('sarahpass')
+
+        customer4 = User(username='lindaallen', email='lindaallen@example.com', role='customer')
+        customer4.set_password('lindapass')
+
+        # db.session.add(admin)
+        db.session.add(organizer1)
+        db.session.add(organizer2)
+        db.session.add(customer1)
+        db.session.add(customer2)
+        db.session.add(customer3)
+        db.session.add(customer4)
+            
+
+
 
         # Create Categories
         music_category = Category(name='Music')
@@ -38,7 +57,7 @@ def seed_data():
             location='Central Park',
             start_time=datetime(2024, 8, 15, 19, 0, 0),
             end_time=datetime(2024, 8, 15, 22, 0, 0),
-            organizer_id=organizer.id,
+            organizer_id=organizer1.id,
             total_tickets=500,
             remaining_tickets=500
         )
@@ -49,7 +68,7 @@ def seed_data():
             location='Tech Center Auditorium',
             start_time=datetime(2024, 9, 10, 9, 0, 0),
             end_time=datetime(2024, 9, 10, 17, 0, 0),
-            organizer_id=organizer.id,
+            organizer_id=organizer2.id,
             total_tickets=200,
             remaining_tickets=200
         )
@@ -73,24 +92,44 @@ def seed_data():
         # Create Tickets
         ticket1 = Ticket(
             event_id=event1.id,
-            user_id=customer.id,
-            ticket_type='Early Bird',
+            user_id=customer1.id,
+            ticket_type='Early Booking',
             price=50.00,
             quantity=2,
-            status='purchased'
+            status='pending'
         )
 
         ticket2 = Ticket(
-            event_id=event2.id,
-            user_id=customer.id,
+            event_id=event1.id,
+            user_id=customer2.id,
             ticket_type='Regular',
-            price=100.00,
+            price=50.00,
             quantity=1,
-            status='purchased'
+            status='pending'
+        )
+
+        ticket3 = Ticket(
+            event_id=event2.id,
+            user_id=customer3.id,
+            ticket_type='VIP',
+            price=100.00,
+            quantity=3,
+            status='pending'
+        )
+
+        ticket4 = Ticket(
+            event_id=event2.id,
+            user_id=customer4.id,
+            ticket_type='Early Bird',
+            price=75.00,
+            quantity=2,
+            status='pending'
         )
 
         db.session.add(ticket1)
         db.session.add(ticket2)
+        db.session.add(ticket3)
+        db.session.add(ticket4)
 
         # Commit the tickets
         db.session.commit()
@@ -105,13 +144,29 @@ def seed_data():
 
         payment2 = Payment(
             ticket_id=ticket2.id,
-            amount=100.00,
+            amount=50.00,
             payment_method='MPESA STK',
+            payment_status='completed'
+        )
+
+        payment3 = Payment(
+            ticket_id=ticket3.id,
+            amount=300.00,
+            payment_method='Credit Card',
+            payment_status='completed'
+        )
+
+        payment4 = Payment(
+            ticket_id=ticket4.id,
+            amount=150.00,
+            payment_method='Credit Card',
             payment_status='completed'
         )
 
         db.session.add(payment1)
         db.session.add(payment2)
+        db.session.add(payment3)
+        db.session.add(payment4)
 
         # Commit all changes to the database
         db.session.commit()
