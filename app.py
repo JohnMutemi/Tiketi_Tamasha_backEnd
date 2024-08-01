@@ -1,5 +1,6 @@
 
 import random
+import secrets
 from flask import Flask, request, jsonify, make_response, session, url_for,  render_template
 from flask_migrate import Migrate
 from flask_cors import CORS
@@ -109,12 +110,19 @@ class Login(Resource):
     def post(self):
         username = request.form.get('username')
         password = request.form.get('password')
+        stay_logged_in = request.form.get('stayLoggedIn') == 'true'
 
         user = User.query.filter_by(username=username).first()
 
         if user and user.check_password(password):
             session['user_id'] = user.id
-            access_token = create_access_token(identity={'user_id': user.id, 'role':user.role})
+
+            # Set token expiration based on stay_logged_in
+            if stay_logged_in:
+                expires = timedelta(days=30)  # Long expiration for stay logged in
+            else:
+                expires = timedelta(hours=1)  # Short expiration for a regular session
+            access_token = create_access_token(identity={'user_id': user.id, 'role': user.role}, expires_delta=expires)
             return {
                 'message': f"Welcome {user.username}",
                 'access_token': access_token,
@@ -195,6 +203,8 @@ class OrganizerDashboard(Resource):
 
         if user.role != 'event_organizer':
             return {'message': 'Access denied'}, 403
+        
+    
 
         events = Event.query.filter_by(organizer_id=user.id).all()
         dashboard_data = []
@@ -215,7 +225,7 @@ class OrganizerDashboard(Resource):
         return jsonify(dashboard_data)
     
 # Handle logout operation
-revoked_tokens = set()  # Consider using a database for persistence
+revoked_tokens = set() 
 
 @jwt.token_in_blocklist_loader
 def check_if_token_revoked(jwt_header, jwt_payload):
@@ -232,7 +242,7 @@ class Logout(Resource):
         db.session.commit()
         session.clear()
         response_data = {"message": "Logout successful"}
-        print("Response Data:", response_data)  # Debugging output
+        print("Response Data:", response_data)  
         return response_data, 200
 
 @app.errorhandler(Exception)
@@ -241,28 +251,28 @@ def handle_exception(e):
         "message": "An unexpected error occurred.",
         "error": str(e)
     }
-    print("Exception occurred:", e)  # Debugging output
-    print("Response Data:", response)  # Debugging output
+    print("Exception occurred:", e)  
+    print("Response Data:", response)  
     return jsonify(response), 500
 
 class CheckSession(Resource):
     def get(self):
         user_id = session.get('user_id')
-        print("Session user_id:", user_id)  # Debugging output
+        print("Session user_id:", user_id)  
         
         if not user_id:
             error_response = {"error": "No active session"}
-            print("Error Response:", error_response)  # Debugging output
+            print("Error Response:", error_response)  
             return jsonify(error_response), 401
 
         user = User.query.get(user_id)
         if user:
             user_data = user.to_dict()
-            print("User Data:", user_data)  # Debugging output
+            print("User Data:", user_data)  
             return jsonify(user_data), 200
         
         error_response = {"error": "User not found"}
-        print("Error Response:", error_response)  # Debugging output
+        print("Error Response:", error_response) 
         return jsonify(error_response), 404
 
 # API endpoints
