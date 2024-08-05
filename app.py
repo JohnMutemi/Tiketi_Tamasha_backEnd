@@ -1,7 +1,7 @@
 
 import random
 import secrets
-from flask import Flask, request, jsonify, make_response, session, url_for,  render_template
+from flask import Flask, request, jsonify, make_response, session, url_for,  render_template, redirect
 from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_restful import Api, Resource
@@ -9,6 +9,7 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from flask_jwt_extended.exceptions import RevokedTokenError
 from werkzeug.exceptions import NotFound
 from datetime import timedelta, datetime
+from models import Customer
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -274,6 +275,42 @@ class CheckSession(Resource):
         error_response = {"error": "User not found"}
         print("Error Response:", error_response) 
         return jsonify(error_response), 404
+
+
+# @app.before_first_request
+# def create_tables():
+#     db.create_all()
+
+@app.route('/')
+def customer():
+    customers = Customer.query.all()
+    return render_template('index.html', customers=customers)
+
+@app.route('/add_customer', methods=['GET', 'POST'])
+def add_customer():
+    if request.method == 'POST':
+        name = request.form['name']
+        email = request.form['email']
+        phone = request.form['phone']
+        
+        new_customer = Customer(name=name, email=email, phone=phone)
+        try:
+            # Add and commit the new customer to the database
+            db.session.add(new_customer)
+            db.session.commit()
+            return jsonify({"message": "Customer added successfully"}), 201
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({"error": str(e), "message": "An unexpected error occurred."}), 500
+
+    return render_template('add_customer.html')
+
+# Route to list all customers
+@app.route('/customers')
+def list_customers():
+    customers = Customer.query.all()
+    customer_list = [{"id": c.id, "name": c.name, "email": c.email, "phone": c.phone} for c in customers]
+    return jsonify(customer_list)
 
 # API endpoints
 

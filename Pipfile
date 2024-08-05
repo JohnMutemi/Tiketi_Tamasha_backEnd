@@ -10,6 +10,7 @@ flask-cors = "*"
 flask-restful = "*"
 flask-migrate = "*"
 sqlalchemy-serializer = "*"
+flask-jwt-extended = "*"
 
 [dev-packages]
 

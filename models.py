@@ -133,5 +133,19 @@ class RevokedToken(db.Model):
     jti = db.Column(db.String(120), unique=True, nullable=False)
     revoked_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    def __init__(self, jti):
-        self.jti = jti
+class Customer(db.Model):
+    __tablename__ = 'customers'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    phone = db.Column(db.String(20))
+
+    def __init__(self, name=None, email=None, phone=None, jti=None):
+        if name is not None and email is not None:
+            self.name = name
+            self.email = email
+            self.phone = phone
+        elif jti is not None:
+            self.jti = jti
+
