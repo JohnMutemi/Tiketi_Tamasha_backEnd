@@ -7,6 +7,7 @@ import random
 fake = Faker()
 
 # Define image URLs and descriptions related to event types
+
 EVENT_INFO = {
     'After Work Party': {
         'image_url': 'https://res.cloudinary.com/dhxtzhs6h/image/upload/v1722761652/hcszbtggl8emdtkv5oqp.png',
@@ -50,6 +51,7 @@ def seed_data():
         db.session.remove()
 
         # Create Users with plaintext passwords (only for testing, not for production)
+
         organizer1 = User(username='janedoe', email='janedoe@example.com', role='event_organizer')
         organizer1.set_password('securepass')
 
@@ -85,6 +87,7 @@ def seed_data():
         db.session.commit()
 
         # Create Events using Faker with updated descriptions
+
         organizers = [organizer1, organizer2]
         events = []  # List to keep track of created events
 
@@ -109,7 +112,7 @@ def seed_data():
         db.session.commit()
 
         # Create Event Categories
-        event_ids = [event.id for event in events]  # Use the list of created events
+        event_ids = [event.id for event in events]  
         category_ids = [category.id for category in Category.query.all()]
 
         added_event_categories = set()  # To track added event-category pairs
