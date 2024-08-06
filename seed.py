@@ -1,8 +1,4 @@
-<<<<<<< HEAD
-#!/usr/bin/env python3
-=======
 from faker import Faker
->>>>>>> events
 from app import app
 from datetime import datetime
 from models import db, User, Event, Ticket, Payment, Category, EventCategory
