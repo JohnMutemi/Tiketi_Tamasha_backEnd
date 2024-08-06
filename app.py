@@ -9,8 +9,6 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from flask_jwt_extended.exceptions import RevokedTokenError
 from werkzeug.exceptions import NotFound
 from datetime import timedelta, datetime
-from models import Customer
-
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
@@ -20,7 +18,7 @@ app.config["SECRET_KEY"] = "JKSRVHJVFBSRDFV" + str(random.randint(1, 10000000000
 app.json.compact = False
 api = Api(app)
 
-from models import db, User, Event, Category, EventCategory, Payment, Ticket, RevokedToken
+from models import db, User, Event, Category, EventCategory, Payment, Ticket, RevokedToken, Customer
 db.init_app(app)
 jwt = JWTManager(app)
 migrate=Migrate(app, db)
@@ -189,13 +187,41 @@ class EventsList(Resource):
                 'end_time': event.end_time,
                 'total_tickets': event.total_tickets,
                 'remaining_tickets': event.remaining_tickets,
-                'tickets': [{'ticket_type': t.ticket_type, 'price': t.price, 'quantity': t.quantity, 'status': t.status} for t in tickets]
+                'tickets': [{'ticket_type': t.ticket_type, 'price': t.price, 'quantity': t.quantity, 'status': t.status} for t in tickets],
+                'image_url': event.image_url  # Include image_url here
             })
 
         return jsonify(event_list)
+
+class EventById(Resource):
+    def get(self, event_id):
+        # Fetch the event by ID
+        event = Event.query.get(event_id)
+        
+        if not event:
+            return {'message': 'Event not found'}, 404
+
+        # Fetch related tickets
+        tickets = Ticket.query.filter_by(event_id=event.id).all()
+        
+        # Prepare the event details
+        event_details = {
+            'id': event.id,
+            'title': event.title,
+            'description': event.description,
+            'location': event.location,
+            'start_time': event.start_time,
+            'end_time': event.end_time,
+            'total_tickets': event.total_tickets,
+            'remaining_tickets': event.remaining_tickets,
+            'tickets': [{'ticket_type': t.ticket_type, 'price': t.price, 'quantity': t.quantity, 'status': t.status} for t in tickets],
+            'image_url': event.image_url  # Include image_url here
+        }
+        return(event_details)
+
 class OrganizerDashboard(Resource):
     @jwt_required()
-    def get(self):
+    def post(self):
         user_id = get_jwt_identity()['user_id']
         user = User.query.get(user_id)
 
@@ -204,27 +230,145 @@ class OrganizerDashboard(Resource):
 
         if user.role != 'event_organizer':
             return {'message': 'Access denied'}, 403
-        
-    
 
-        events = Event.query.filter_by(organizer_id=user.id).all()
-        dashboard_data = []
+        # Parse and validate form data
+        try:
+            title = request.form['title']
+            description = request.form['description']
+            location = request.form['location']
+            start_time = datetime.strptime(request.form['start_time'], '%Y-%m-%dT%H:%M:%S')
+            end_time = datetime.strptime(request.form['end_time'], '%Y-%m-%dT%H:%M:%S')
+            total_tickets = int(request.form['total_tickets'])
+            remaining_tickets = int(request.form['remaining_tickets'])
+            image_url = request.form['image_url']
+        except (KeyError, ValueError, TypeError):
+            return {'message': 'Invalid input data'}, 400
 
-        for event in events:
-            tickets = Ticket.query.filter_by(event_id=event.id).all()
-            total_tickets = sum(ticket.quantity for ticket in tickets)
-            remaining_tickets = event.remaining_tickets
+        new_event = Event(
+            title=title,
+            description=description,
+            location=location,
+            start_time=start_time,
+            end_time=end_time,
+            total_tickets=total_tickets,
+            remaining_tickets=remaining_tickets,
+            image_url=image_url,
+            organizer_id=user.id
+        )
 
-            dashboard_data.append({
-                'event_id': event.id,
-                'event_title': event.title,
-                'total_tickets': total_tickets,
-                'remaining_tickets': remaining_tickets,
-                'attendees': [{'username': User.query.get(t.user_id).username, 'ticket_type': t.ticket_type, 'quantity': t.quantity} for t in tickets]
-            })
+        db.session.add(new_event)
+        db.session.commit()
 
-        return jsonify(dashboard_data)
-    
+        return {'id': new_event.id, 'message': 'Event created successfully'}, 201
+
+    @jwt_required()
+    def put(self):
+        user_id = get_jwt_identity()['user_id']
+        user = User.query.get(user_id)
+
+        if not user:
+            return {'message': 'User not found'}, 404
+
+        if user.role != 'event_organizer':
+            return {'message': 'Access denied'}, 403
+
+        event_id = request.form.get('event_id')
+        event = Event.query.get(event_id)
+
+        if not event:
+            return {'message': 'Event not found'}, 404
+
+        if event.organizer_id != user.id:
+            return {'message': 'Access denied'}, 403
+
+        # Update event with provided data
+        try:
+            event.title = request.form.get('title', event.title)
+            event.description = request.form.get('description', event.description)
+            event.location = request.form.get('location', event.location)
+            if 'start_time' in request.form:
+                event.start_time = datetime.strptime(request.form['start_time'], '%Y-%m-%dT%H:%M:%S')
+            if 'end_time' in request.form:
+                event.end_time = datetime.strptime(request.form['end_time'], '%Y-%m-%dT%H:%M:%S')
+            event.total_tickets = int(request.form.get('total_tickets', event.total_tickets))
+            event.remaining_tickets = int(request.form.get('remaining_tickets', event.remaining_tickets))
+            event.image_url = request.form.get('image_url', event.image_url)
+        except (ValueError, TypeError):
+            return {'message': 'Invalid input data'}, 400
+
+        db.session.commit()
+
+        return {'message': 'Event updated successfully'}, 200
+
+    @jwt_required()
+    def patch(self):
+        user_id = get_jwt_identity()['user_id']
+        user = User.query.get(user_id)
+
+        if not user:
+            return {'message': 'User not found'}, 404
+
+        if user.role != 'event_organizer':
+            return {'message': 'Access denied'}, 403
+
+        event_id = request.form.get('event_id')
+        event = Event.query.get(event_id)
+
+        if not event:
+            return {'message': 'Event not found'}, 404
+
+        if event.organizer_id != user.id:
+            return {'message': 'Access denied'}, 403
+
+        # Update event with provided data
+        try:
+            if 'title' in request.form:
+                event.title = request.form['title']
+            if 'description' in request.form:
+                event.description = request.form['description']
+            if 'location' in request.form:
+                event.location = request.form['location']
+            if 'start_time' in request.form:
+                event.start_time = datetime.strptime(request.form['start_time'], '%Y-%m-%dT%H:%M:%S')
+            if 'end_time' in request.form:
+                event.end_time = datetime.strptime(request.form['end_time'], '%Y-%m-%dT%H:%M:%S')
+            if 'total_tickets' in request.form:
+                event.total_tickets = int(request.form['total_tickets'])
+            if 'remaining_tickets' in request.form:
+                event.remaining_tickets = int(request.form['remaining_tickets'])
+            if 'image_url' in request.form:
+                event.image_url = request.form['image_url']
+        except (ValueError, TypeError):
+            return {'message': 'Invalid input data'}, 400
+
+        db.session.commit()
+
+        return {'message': 'Event updated successfully'}, 200
+
+    @jwt_required()
+    def delete(self):
+        user_id = get_jwt_identity()['user_id']
+        user = User.query.get(user_id)
+
+        if not user:
+            return {'message': 'User not found'}, 404
+
+        if user.role != 'event_organizer':
+            return {'message': 'Access denied'}, 403
+
+        event_id = request.form.get('event_id')
+        event = Event.query.get(event_id)
+
+        if not event:
+            return {'message': 'Event not found'}, 404
+
+        if event.organizer_id != user.id:
+            return {'message': 'Access denied'}, 403
+
+        db.session.delete(event)
+        db.session.commit()
+
+        return {'message': 'Event deleted successfully'}, 200
 # Handle logout operation
 revoked_tokens = set() 
 
@@ -275,44 +419,139 @@ class CheckSession(Resource):
         error_response = {"error": "User not found"}
         print("Error Response:", error_response) 
         return jsonify(error_response), 404
-
-
-# @app.before_first_request
-# def create_tables():
-#     db.create_all()
-
-@app.route('/')
-def customer():
-    customers = Customer.query.all()
-    return render_template('index.html', customers=customers)
-
-@app.route('/add_customer', methods=['GET', 'POST'])
-def add_customer():
-    if request.method == 'POST':
-        name = request.form['name']
-        email = request.form['email']
-        phone = request.form['phone']
+class CategoryResource(Resource):
+    def get(self, category_id=None):
+        if category_id:
+            category = Category.query.get(category_id)
+            if category:
+                return category.to_dict(), 200
+            return {'error': 'Category not found'}, 404
         
-        new_customer = Customer(name=name, email=email, phone=phone)
-        try:
-            # Add and commit the new customer to the database
-            db.session.add(new_customer)
-            db.session.commit()
-            return jsonify({"message": "Customer added successfully"}), 201
-        except Exception as e:
-            db.session.rollback()
-            return jsonify({"error": str(e), "message": "An unexpected error occurred."}), 500
+        categories = Category.query.all()
+        return [category.to_dict() for category in categories], 200
+    
+class TicketResource(Resource):
+    def get(self, ticket_id=None):
+        if ticket_id:
+            ticket = Ticket.query.get(ticket_id)
+            if ticket:
+                return {
+                    'id': ticket.id,
+                    'event_id': ticket.event_id,
+                    'user_id': ticket.user_id,
+                    'ticket_type': ticket.ticket_type,
+                    'price': float(ticket.price),
+                    'quantity': ticket.quantity,
+                    'status': ticket.status
+                }, 200
+            return {'error': 'Ticket not found'}, 404
+        
+        # List all tickets
+        tickets = Ticket.query.all()
+        return [
+            {
+                'id': ticket.id,
+                'event_id': ticket.event_id,
+                'user_id': ticket.user_id,
+                'ticket_type': ticket.ticket_type,
+                'price': float(ticket.price),
+                'quantity': ticket.quantity,
+                'status': ticket.status
+            }
+            for ticket in tickets
+        ], 200
 
-    return render_template('add_customer.html')
+    @jwt_required()
+    def post(self):
+        user_id = get_jwt_identity()['user_id']
+        if not user_id:
+            return {'message': 'User not found'}, 404
 
-# Route to list all customers
-@app.route('/customers')
-def list_customers():
-    customers = Customer.query.all()
-    customer_list = [{"id": c.id, "name": c.name, "email": c.email, "phone": c.phone} for c in customers]
-    return jsonify(customer_list)
+        event_id = request.form.get('event_id')
+        ticket_type = request.form.get('ticket_type')
+        price = request.form.get('price')
+        quantity = request.form.get('quantity')
+        status = request.form.get('status')
 
-# API endpoints
+        if not event_id or not ticket_type or not price or not quantity or not status:
+            return {'message': 'All fields are required'}, 400
+
+        new_ticket = Ticket(
+            event_id=event_id,
+            user_id=user_id,
+            ticket_type=ticket_type,
+            price=price,
+            quantity=quantity,
+            status=status
+        )
+
+        db.session.add(new_ticket)
+        db.session.commit()
+
+        return {'id': new_ticket.id, 'message': 'Ticket created successfully'}, 201
+
+    @jwt_required()
+    def put(self, ticket_id):
+        ticket = Ticket.query.get(ticket_id)
+        if not ticket:
+            return {'message': 'Ticket not found'}, 404
+
+        user_id = get_jwt_identity()['user_id']
+        if ticket.user_id != user_id:
+            return {'message': 'Access denied'}, 403
+
+        ticket.ticket_type = request.form.get('ticket_type', ticket.ticket_type)
+        ticket.price = request.form.get('price', ticket.price)
+        ticket.quantity = request.form.get('quantity', ticket.quantity)
+        ticket.status = request.form.get('status', ticket.status)
+
+        db.session.commit()
+
+        return {'message': 'Ticket updated successfully'}, 200
+
+    @jwt_required()
+    def delete(self, ticket_id):
+        ticket = Ticket.query.get(ticket_id)
+        if not ticket:
+            return {'message': 'Ticket not found'}, 404
+
+        user_id = get_jwt_identity()['user_id']
+        if ticket.user_id != user_id:
+            return {'message': 'Access denied'}, 403
+
+        db.session.delete(ticket)
+        db.session.commit()
+
+        return {'message': 'Ticket deleted successfully'}, 200
+    
+class UserRole(Resource):
+    def get(self):
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'error': 'No active session'}), 401
+        
+        user = User.query.get(user_id)
+        if user:
+            return jsonify({'role': user.role}), 200
+
+        return jsonify({'error': 'User not found'}), 404
+
+    
+class BookTicket(Resource):
+    @jwt_required()  
+    def post(self):
+        user_id = get_jwt_identity()['user_id']
+        if not user_id:
+            return jsonify({'error': 'No active session'}), 401
+        
+        user = User.query.get(user_id)
+        if user and user.role == 'customer':
+            # Perform the booking
+            return jsonify({'message': 'Booking successful'}), 200
+        
+        return jsonify({'error': 'Unauthorized to book tickets'}), 403
+
+# AP end points
 
 api.add_resource(UserResource, '/users', '/users/<int:user_id>')
 api.add_resource(Login, '/login')
@@ -320,7 +559,11 @@ api.add_resource(CheckSession, '/session')
 api.add_resource(Logout, '/logout')
 api.add_resource(Register, '/register')
 api.add_resource(EventsList, '/events')
-api.add_resource( OrganizerDashboard, '/organizer/dashboard')
-
+api.add_resource(EventById, '/events/<int:event_id>')
+api.add_resource( OrganizerDashboard, '/organizer-dashboard')
+api.add_resource(CategoryResource, '/categories', '/categories/<int:category_id>')
+api.add_resource(TicketResource, '/tickets', '/tickets/<int:ticket_id>')
+api.add_resource(UserRole, '/user-role')
+api.add_resource(BookTicket, '/book-ticket')
 if __name__ == '__main__':
     app.run(port=5555, debug=True)

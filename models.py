@@ -80,11 +80,13 @@ class Event(db.Model, SerializerMixin):
     total_tickets = db.Column(db.Integer, nullable=False)
     remaining_tickets = db.Column(db.Integer, nullable=False)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    image_url = db.Column(db.String(255), nullable=True)   
 
     tickets = db.relationship('Ticket', backref='event')
     event_categories = db.relationship('EventCategory', backref='event')
 
     serialize_rules = ('-tickets.event', '-event_categories.event')
+
 
 class Ticket(db.Model, SerializerMixin):
     __tablename__ = 'tickets'
