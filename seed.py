@@ -70,12 +70,21 @@ def seed_data():
         customer4 = User(username='lindaallen', email='lindaallen@example.com', role='customer')
         customer4.set_password('lindapass')
 
+        admin1 = User(username='adminone', email='adminone@example.com', role='admin')
+        admin1.set_password('adminpass1')
+
+        admin2 = User(username='admintwo', email='admintwo@example.com', role='admin')
+        admin2.set_password('adminpass2')
+
+
         db.session.add(organizer1)
         db.session.add(organizer2)
         db.session.add(customer1)
         db.session.add(customer2)
         db.session.add(customer3)
         db.session.add(customer4)
+        db.session.add(admin1)
+        db.session.add(admin2)
 
         # Create Categories
         categories = ['Music', 'Technology', 'Arts', 'Sports', 'Food']

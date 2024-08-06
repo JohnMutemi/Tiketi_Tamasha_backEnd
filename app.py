@@ -148,9 +148,9 @@ class Register(Resource):
         if not username or not password or not email or not role:
             print("Missing required fields.")
             return {'message': 'username, password, role, and email are required'}, 400
-        if role not in ['event_organizer', 'customer']:
+        if role not in ['event_organizer', 'customer', 'admin']:
             print('Invalid role provided')
-            return {'message': 'Invalid role. Choose either "event_organizer" or "customer"'}, 400
+            return {'message': 'Invalid role. Choose either "event_organizer", "customer" or "admin'}, 400
         
         existing_user = User.query.filter_by(username=username).first()
         if existing_user:
@@ -552,6 +552,21 @@ class BookTicket(Resource):
             return jsonify({'message': 'Booking successful'}), 200
         
         return jsonify({'error': 'Unauthorized to book tickets'}), 403
+    
+class AdminDashboard(Resource):
+    @jwt_required()
+    def get(self):
+        user_id = get_jwt_identity()['user_id']
+        user = User.query.get(user_id)
+
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+
+        if user.role != 'admin':
+            return jsonify({'error': 'Unauthorized access'}), 403
+
+        return jsonify({'message': 'Welcome to the admin dashboard'})
+
 
 # AP end points
 
@@ -567,5 +582,6 @@ api.add_resource(CategoryResource, '/categories', '/categories/<int:category_id>
 api.add_resource(TicketResource, '/tickets', '/tickets/<int:ticket_id>')
 api.add_resource(UserRole, '/user-role')
 api.add_resource(BookTicket, '/book-ticket')
+api.add_resource(AdminDashboard, '/admin_dashboard')
 if __name__ == '__main__':
     app.run(port=5555, debug=True)
