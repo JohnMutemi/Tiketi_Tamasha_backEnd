@@ -52,6 +52,9 @@ def seed_data():
 
         # Create Users with plaintext passwords (only for testing, not for production)
 
+        admin = User(username='admin', email='admin@example.com', role='admin')
+        admin.set_password('adminpass')
+
         organizer1 = User(username='janedoe', email='janedoe@example.com', role='event_organizer')
         organizer1.set_password('securepass')
 
@@ -70,6 +73,7 @@ def seed_data():
         customer4 = User(username='lindaallen', email='lindaallen@example.com', role='customer')
         customer4.set_password('lindapass')
 
+        db.session.add(admin)
         db.session.add(organizer1)
         db.session.add(organizer2)
         db.session.add(customer1)

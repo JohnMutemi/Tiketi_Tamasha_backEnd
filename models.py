@@ -68,6 +68,52 @@ class User(db.Model, SerializerMixin):
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
         }
 
+    def is_admin(self):
+        return self.role == 'admin'
+
+    def create_user(self, username, email, password, role):
+        if not self.is_admin():
+            raise PermissionError("Only admins can create users.")
+        new_user = User(username=username, email=email, role=role)
+        new_user.set_password(password)
+        db.session.add(new_user)
+        db.session.commit()
+        return new_user
+
+    def update_user(self, user_id, **kwargs):
+        if not self.is_admin():
+            raise PermissionError("Only admins can update users.")
+        user = User.query.get(user_id)
+        for key, value in kwargs.items():
+            if hasattr(user, key):
+                setattr(user, key, value)
+        db.session.commit()
+        return user
+
+    def delete_user(self, user_id):
+        if not self.is_admin():
+            raise PermissionError("Only admins can delete users.")
+        user = User.query.get(user_id)
+        db.session.delete(user)
+        db.session.commit()
+
+    def manage_event(self, event_id, **kwargs):
+        if not self.is_admin():
+            raise PermissionError("Only admins can manage events.")
+        event = Event.query.get(event_id)
+        for key, value in kwargs.items():
+            if hasattr(event, key):
+                setattr(event, key, value)
+        db.session.commit()
+        return event
+
+    def delete_event(self, event_id):
+        if not self.is_admin():
+            raise PermissionError("Only admins can delete events.")
+        event = Event.query.get(event_id)
+        db.session.delete(event)
+        db.session.commit()
+
 class Event(db.Model, SerializerMixin):
     __tablename__ = 'events'
     id = db.Column(db.Integer, primary_key=True)
@@ -76,7 +122,7 @@ class Event(db.Model, SerializerMixin):
     location = db.Column(db.String(100), nullable=False)
     start_time = db.Column(db.DateTime, nullable=False)
     end_time = db.Column(db.DateTime, nullable=False)
-    organizer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    organizer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True) 
     total_tickets = db.Column(db.Integer, nullable=False)
     remaining_tickets = db.Column(db.Integer, nullable=False)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
