@@ -1,6 +1,3 @@
-
-import random
-import secrets
 from flask import Flask, request, jsonify, make_response, session, url_for,  render_template, redirect
 from flask_migrate import Migrate
 from flask_cors import CORS
@@ -10,6 +7,13 @@ from flask_jwt_extended.exceptions import RevokedTokenError
 from werkzeug.exceptions import NotFound
 from datetime import timedelta, datetime
 from jwt.exceptions import DecodeError
+# SMTP
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+from datetime import datetime, timedelta
+import random
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -20,7 +24,7 @@ app.config["SECRET_KEY"] = "JKSRVHJVFBSRDFV" + str(random.randint(1, 10000000000
 app.json.compact = False
 api = Api(app)
 
-from models import db, User, Event, Category, EventCategory, Payment, Ticket, RevokedToken, Customer
+from models import db, User, Event, Category, EventCategory, Payment, Ticket, RevokedToken
 db.init_app(app)
 jwt = JWTManager(app)
 migrate=Migrate(app, db)
@@ -55,18 +59,38 @@ def show_cookies(key):
 @app.route('/')
 def index():
     return render_template('index.html')
-
 class UserResource(Resource):
+    @jwt_required()
     def get(self, user_id=None):
+        user_identity = get_jwt_identity()
+        current_user = User.query.get(user_identity['user_id'])
+
+        if not current_user:
+            return {'error': 'User not found'}, 404
+
+        if current_user.role != 'admin':
+            return {'message': 'Access denied'}, 403
+
         if user_id:
             user = User.query.get(user_id)
             if user:
                 return user.to_dict(), 200
             return {'error': 'User not found'}, 404
+        
         users = User.query.all()
         return [user.to_dict() for user in users], 200
      
+    @jwt_required()
     def delete(self, user_id):
+        user_identity = get_jwt_identity()
+        current_user = User.query.get(user_identity['user_id'])
+
+        if not current_user:
+            return {'error': 'User not found'}, 404
+
+        if current_user.role != 'admin':
+            return {'message': 'Access denied'}, 403
+
         user = User.query.get(user_id)
         if not user:
             return {'error': 'User not found'}, 404
@@ -78,7 +102,18 @@ class UserResource(Resource):
         except Exception as e:
             print(f"Error occurred during user deletion: {e}")
             return {'message': 'Internal server error'}, 500
+
+    @jwt_required()
     def put(self, user_id):
+        user_identity = get_jwt_identity()
+        current_user = User.query.get(user_identity['user_id'])
+
+        if not current_user:
+            return {'error': 'User not found'}, 404
+
+        if current_user.role != 'admin':
+            return {'message': 'Access denied'}, 403
+
         user = User.query.get(user_id)
         if not user:
             return {'error': 'User not found'}, 404
@@ -95,8 +130,8 @@ class UserResource(Resource):
         if email:
             user.email = email
         if role:
-            if role not in ['event_organizer', 'customer']:
-                return {'message': 'Invalid role. Choose either "event_organizer" or "customer"'}, 400
+            if role not in ['event_organizer', 'customer', 'admin']:
+                return {'message': 'Invalid role. Choose either "event_organizer", "customer", or "admin"'}, 400
             user.role = role
 
         try:
@@ -105,6 +140,7 @@ class UserResource(Resource):
         except Exception as e:
             print(f"Error occurred during user update: {e}")
             return {'message': 'Internal server error'}, 500
+
 
 class Login(Resource):
 
@@ -116,8 +152,6 @@ class Login(Resource):
         user = User.query.filter_by(username=username).first()
 
         if user and user.check_password(password):
-            session['user_id'] = user.id
-
             # Set token expiration based on stay_logged_in
             if stay_logged_in:
                 expires = timedelta(days=30)  # Long expiration for stay logged in
@@ -129,32 +163,30 @@ class Login(Resource):
                 'access_token': access_token,
                 'username': user.username,
                 'email': user.email,
-                'role':user.role,
+                'role': user.role,
                 'user_id': user.id
             }, 200
         else:
             return {"error": "Invalid username or password"}, 401
-class Register(Resource):
-    def post(self):
-        print(f"Received data: {request.form}")
 
+
+# Handle Registration and Approval 
+
+class PublicRegister(Resource):
+    def post(self):
         username = request.form.get('username')
         password = request.form.get('password')
         email = request.form.get('email')
         role = request.form.get('role')
 
-        print(f"Extracted - Username: {username}, Email: {email}, Role: {role}, Password: {password}")
-
         if not username or not password or not email or not role:
-            print("Missing required fields.")
-            return {'message': 'username, password, role, and email are required'}, 400
-        if role not in ['event_organizer', 'customer']:
-            print('Invalid role provided')
-            return {'message': 'Invalid role. Choose either "event_organizer" or "customer"'}, 400
+            return {'message': 'Username, password, role, and email are required'}, 400
         
+        if role not in ['event_organizer', 'customer']:
+            return {'message': 'Invalid role. Choose either "event_organizer" or "customer"'}, 400
+
         existing_user = User.query.filter_by(username=username).first()
         if existing_user:
-            print(f"User already exists: {existing_user.username}")
             return {'message': 'User already exists'}, 400
 
         try:
@@ -162,17 +194,147 @@ class Register(Resource):
             new_user.set_password(password)
             db.session.add(new_user)
             db.session.commit()
-            print(f"User created: {new_user.username}")
 
-            success_message = {'message': 'User registered successfully'}
-            response = make_response(success_message)
-            response.status_code = 201
+            # Notify admin about the new registration
+            notify_admin(new_user)
 
-            return response
+            return {'message': 'User registered successfully. Waiting for admin approval.'}, 201
+        except Exception as e:
+            app.logger.error(f"Error occurred during registration: {e}")
+            return {'message': 'Internal server error'}, 500
+
+def notify_admin(new_user):
+    admin_email = 'everlynmarius19@gmail.com'
+    subject = 'New User Registration Awaiting Approval'
+    body = f"""
+    A new user has registered and is awaiting your approval:
+    
+    Username: {new_user.username}
+    Email: {new_user.email}
+    Role: {new_user.role}
+    
+    Please log in to the admin panel to approve or reject this registration.
+    """
+    send_email(admin_email, subject, body)
+
+class GenerateOTP(Resource):
+    @jwt_required()
+    def post(self):
+        current_user = get_jwt_identity()
+        current_user_role = current_user['role']
+
+        if current_user_role != 'admin':
+            return {'message': 'Unauthorized. Only admins can generate OTP.'}, 403
+
+        user_id = request.form.get('user_id')
+
+        user = User.query.get(user_id)
+        if not user:
+            return {'message': 'User not found'}, 404
+
+        otp = generate_otp()
+        otp_expiration = datetime.utcnow() + timedelta(minutes=10)
+        user.otp = otp
+        user.otp_expiration = otp_expiration
+        db.session.commit()
+
+        # Send OTP email
+        subject = 'Your OTP Code'
+        body = f'Your OTP code is {otp}. It is valid for 10 minutes.'
+        send_email(user.email, subject, body)
+
+        return {'message': 'OTP sent to user successfully'}, 200
+
+def generate_otp():
+    # Generate a 6-digit OTP
+    return str(random.randint(100000, 999999))
+
+class VerifyOTP(Resource):
+
+    def post(self):
+        username = request.form.get('username')
+        otp = request.form.get('otp')
+
+        user = User.query.filter_by(username=username).first()
+
+        if user and user.otp == otp and user.otp_expiration > datetime.now():
+            session['user_id'] = user.id
+
+            # Clear OTP after successful verification
+            user.otp = None
+            user.otp_expiration = None
+            db.session.commit()
+
+            return {"message": "OTP verified, proceed to login"}, 200
+        else:
+            return {"error": "Invalid or expired OTP"}, 401
+
+def send_email(to, subject, body):
+    from_email = 'jmtutorsalp@gmail.com'
+    from_password = 'Jonny@1111' 
+    smtp_server = 'smtp.gmail.com'
+    smtp_port = 465 
+
+    msg = MIMEMultipart()
+    msg['From'] = from_email
+    msg['To'] = to
+    msg['Subject'] = subject
+
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()  # Start TLS for security
+        server.login(from_email, from_password)
+        server.sendmail(from_email, to, msg.as_string())
+        server.close()
+    except Exception as e:
+        app.logger.error(f"Failed to send email: {e}")
+
+class AdminRegister(Resource):
+    @jwt_required()
+    def post(self):
+        current_user = get_jwt_identity()
+        current_user_role = current_user['role']
+
+        # Only allow admins to register new admins
+        if current_user_role != 'admin':
+            return {'message': 'Unauthorized. Only admins can register new admins.'}, 403
+
+        username = request.form.get('username')
+        password = request.form.get('password')
+        email = request.form.get('email')
+        role = request.form.get('role')
+
+        if not username or not password or not email or not role:
+            return {'message': 'Username, password, role, and email are required'}, 400
+        
+        if role != 'admin':
+            return {'message': 'Invalid role. Only "admin" role can be registered here.'}, 400
+
+        # Check for the allowed email domain
+        allowed_domains = ['gmail.com']
+        email_domain = email.split('@')[-1]
+
+        if email_domain not in allowed_domains:
+            return {'message': f'Invalid email domain. Admins must use an email ending in @{allowed_domains[0]}'}, 400
+
+        existing_user = User.query.filter_by(username=username).first()
+        if existing_user:
+            return {'message': 'User already exists'}, 400
+
+        try:
+            new_user = User(username=username, email=email, role=role)
+            new_user.set_password(password)
+            db.session.add(new_user)
+            db.session.commit()
+
+            return {'message': 'Admin registered successfully'}, 201
         except Exception as e:
             print(f"Error occurred during registration: {e}")
             return {'message': 'Internal server error'}, 500
 
+    
 class EventsList(Resource):
     def get(self):
         events = Event.query.all()
@@ -190,11 +352,79 @@ class EventsList(Resource):
                 'total_tickets': event.total_tickets,
                 'remaining_tickets': event.remaining_tickets,
                 'tickets': [{'ticket_type': t.ticket_type, 'price': t.price, 'quantity': t.quantity, 'status': t.status} for t in tickets],
-                'image_url': event.image_url  # Include image_url here
+                'image_url':event.image_url
+    
             })
 
         return jsonify(event_list)
 
+    @jwt_required()
+    def post(self):
+        current_user = get_jwt_identity()
+        current_user_role = current_user['role']
+        current_user_id = current_user['user_id']
+
+        title = request.form.get('title')
+        description = request.form.get('description')
+        location = request.form.get('location')
+        start_time = request.form.get('start_time')
+        end_time = request.form.get('end_time')
+        total_tickets = request.form.get('total_tickets')
+        remaining_tickets = request.form.get('remaining_tickets')
+        image_url = request.form.get('image_url')
+
+        if not title or not description or not location or not start_time or not end_time or not total_tickets or not remaining_tickets or not image_url:
+            return {'message': 'All fields are required'}, 400
+
+        if current_user_role not in ['admin', 'event_organizer']:
+            return {'message': 'Unauthorized. Only admins or event organizers can create events.'}, 403
+
+        try:
+            event = Event(
+                title=title,
+                description=description,
+                location=location,
+                start_time=datetime.fromisoformat(start_time),
+                end_time=datetime.fromisoformat(end_time),
+                total_tickets=int(total_tickets),
+                remaining_tickets=int(remaining_tickets),
+                image_url=image_url,
+                organizer_id=current_user_id if current_user_role == 'event_organizer' else None
+            )
+            db.session.add(event)
+            db.session.commit()
+            return {'message': 'Event created successfully'}, 201
+        except Exception as e:
+            print(f"Error occurred during event creation: {e}")
+            return {'message': 'Internal server error'}, 500
+
+    @jwt_required()
+    def delete(self):
+        current_user = get_jwt_identity()
+        current_user_role = current_user['role']
+
+        if current_user_role != 'admin':
+            return {'message': 'Unauthorized. Only admins can delete events.'}, 403
+
+        event_id = request.form.get('event_id')
+
+        if not event_id:
+            return {'message': 'Event ID is required'}, 400
+
+        event = Event.query.get(event_id)
+
+        if not event:
+            return {'message': 'Event not found'}, 404
+
+        try:
+            db.session.delete(event)
+            db.session.commit()
+            return {'message': 'Event deleted successfully'}, 200
+        except Exception as e:
+            print(f"Error occurred during event deletion: {e}")
+            return {'message': 'Internal server error'}, 500
+
+        
 class EventById(Resource):
     def get(self, event_id):
         # Fetch the event by ID
@@ -217,7 +447,7 @@ class EventById(Resource):
             'total_tickets': event.total_tickets,
             'remaining_tickets': event.remaining_tickets,
             'tickets': [{'ticket_type': t.ticket_type, 'price': t.price, 'quantity': t.quantity, 'status': t.status} for t in tickets],
-            'image_url': event.image_url  # Include image_url here
+            'image_url': event.image_url 
         }
         return(event_details)
 
@@ -552,14 +782,121 @@ class BookTicket(Resource):
             return jsonify({'message': 'Booking successful'}), 200
         
         return jsonify({'error': 'Unauthorized to book tickets'}), 403
+    
+# class Notifications(Resource):
+#     @jwt_required()
+#     def get(self):
+#         current_user = get_jwt_identity()
+#         if current_user['role'] != 'admin':
+#             return {'message': 'Access denied'}, 403
 
+#         notifications = Notification.query.filter_by(user_id=current_user['id']).all()
+#         notification_list = [{'id': n.id, 'message': n.message, 'timestamp': n.timestamp.isoformat()} for n in notifications]
+        
+#         return {'notifications': notification_list}, 200
+
+#     @jwt_required()
+#     def post(self):
+#         current_user = get_jwt_identity()
+#         if current_user['role'] != 'admin':
+#             return {'message': 'Access denied'}, 403
+
+#         message = request.json.get('message')
+#         if not message:
+#             return {'message': 'Message is required'}, 400
+
+#         try:
+#             notification = Notification(user_id=current_user['id'], message=message)
+#             db.session.add(notification)
+#             db.session.commit()
+#             return {'message': 'Notification sent successfully'}, 201
+#         except Exception as e:
+#             app.logger.error(f"Error occurred while sending notification: {e}")
+#             return {'message': 'Internal server error'}, 500
+class AdminDashboard(Resource):
+    @jwt_required()
+    def get(self):
+        claims = get_jwt_identity()
+        if claims['role'] != 'admin':
+            return {'message': 'Access denied'}, 403
+        
+        users = User.query.all()
+        events = Event.query.all()
+        
+        return {
+            'users': [user.to_dict() for user in users],
+            'events': [event.to_dict() for event in events]
+        }, 200
+
+    @jwt_required()
+    def delete(self, user_id):
+        claims = get_jwt_identity()
+        if claims['role'] != 'admin':
+            return {'message': 'Access denied'}, 403
+
+        user = User.query.get(user_id)
+        if not user:
+            return {'message': 'User not found'}, 404
+        
+        db.session.delete(user)
+        db.session.commit()
+        return {'message': 'User deleted successfully'}, 200
+
+    @jwt_required()
+    def put(self, user_id):
+        claims = get_jwt_identity()
+        if claims['role'] != 'admin':
+            return {'message': 'Access denied'}, 403
+
+        user = User.query.get(user_id)
+        if not user:
+            return {'message': 'User not found'}, 404
+
+        data = request.get_json()
+        user.username = data.get('username', user.username)
+        user.email = data.get('email', user.email)
+        user.role = data.get('role', user.role)
+
+        db.session.commit()
+        return {'message': 'User updated successfully'}, 200
+
+    @jwt_required()
+    def patch(self, event_id):
+        claims = get_jwt_identity()
+        if claims['role'] != 'admin':
+            return {'message': 'Access denied'}, 403
+
+        event = Event.query.get(event_id)
+        if not event:
+            return {'message': 'Event not found'}, 404
+
+        data = request.get_json()
+        event.title = data.get('title', event.title)
+        event.description = data.get('description', event.description)
+        event.location = data.get('location', event.location)
+        event.start_time = data.get('start_time', event.start_time)
+        event.end_time = data.get('end_time', event.end_time)
+        event.total_tickets = data.get('total_tickets', event.total_tickets)
+        event.remaining_tickets = data.get('remaining_tickets', event.remaining_tickets)
+        event.image_url = data.get('image_url', event.image_url)
+
+        db.session.commit()
+        return {'message': 'Event updated successfully'}, 200
+
+    
+@jwt.user_identity_loader
+def user_identity_lookup(user):
+    return {'user_id': user['user_id'], 'role': user['role']}
 # AP end points
 
 api.add_resource(UserResource, '/users', '/users/<int:user_id>')
 api.add_resource(Login, '/login')
 api.add_resource(CheckSession, '/session')
 api.add_resource(Logout, '/logout')
-api.add_resource(Register, '/register')
+api.add_resource(PublicRegister, '/register')
+api.add_resource(AdminRegister, '/register/admin')
+api.add_resource(GenerateOTP, '/otp/generate')
+api.add_resource(VerifyOTP, '/otp/verify')
 api.add_resource(EventsList, '/events')
 api.add_resource(EventById, '/events/<int:event_id>')
 api.add_resource( OrganizerDashboard, '/organizer-dashboard')
@@ -567,5 +904,7 @@ api.add_resource(CategoryResource, '/categories', '/categories/<int:category_id>
 api.add_resource(TicketResource, '/tickets', '/tickets/<int:ticket_id>')
 api.add_resource(UserRole, '/user-role')
 api.add_resource(BookTicket, '/book-ticket')
+api.add_resource(AdminDashboard, '/admin-dashboard', '/admin-dashboard/<int:user_id>', '/admin-dashboard/event/<int:event_id>')
+# api.add_resource(Notifications, '/notifications')
 if __name__ == '__main__':
     app.run(port=5555, debug=True)
