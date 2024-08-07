@@ -651,16 +651,56 @@ class CheckSession(Resource):
         error_response = {"error": "User not found"}
         print("Error Response:", error_response) 
         return jsonify(error_response), 404
-class CategoryResource(Resource):
-    def get(self, category_id=None):
-        if category_id:
-            category = Category.query.get(category_id)
-            if category:
-                return category.to_dict(), 200
-            return {'error': 'Category not found'}, 404
+# class CategoryResource(Resource):
+#     def get(self, category_id=None):
+#         if category_id:
+#             category = Category.query.get(category_id)
+#             if category:
+#                 return category.to_dict(), 200
+#             return {'error': 'Category not found'}, 404
         
+#         categories = Category.query.all()
+#         return [category.to_dict() for category in categories], 200
+    
+class Category(db.Model):
+    __tablename__ = 'categories'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)
+
+    def to_dict(self):
+        return {'id': self.id, 'name': self.name}
+
+@app.route('/categories', methods=['GET', 'POST'])
+def handle_categories():
+    if request.method == 'GET':
         categories = Category.query.all()
-        return [category.to_dict() for category in categories], 200
+        return jsonify([category.to_dict() for category in categories])
+    
+    if request.method == 'POST':
+        data = request.json
+        new_category = Category(name=data['name'])
+        db.session.add(new_category)
+        db.session.commit()
+        return jsonify(new_category.to_dict()), 201
+
+@app.route('/categories/<int:category_id>', methods=['GET', 'PUT', 'DELETE'])
+def handle_category(category_id):
+    category = Category.query.get_or_404(category_id)
+
+    if request.method == 'GET':
+        return jsonify(category.to_dict())
+    
+    if request.method == 'PUT':
+        data = request.json
+        category.name = data['name']
+        db.session.commit()
+        return jsonify(category.to_dict())
+    
+    if request.method == 'DELETE':
+        db.session.delete(category)
+        db.session.commit()
+        return '', 204
+
     
 class TicketResource(Resource):
     def get(self, ticket_id=None):
@@ -887,7 +927,33 @@ class AdminDashboard(Resource):
 @jwt.user_identity_loader
 def user_identity_lookup(user):
     return {'user_id': user['user_id'], 'role': user['role']}
-# AP end points
+
+@app.route('/api/transactions', methods=['GET'])
+def get_transactions():
+    # queries the Payment model to fetch all transactions
+    transactions = Payment.query.all()
+
+    transaction_list = []
+    for payment in transactions:
+        # fetches the associated ticket
+        ticket = Ticket.query.get(payment.ticket_id)
+        user = User.query.get(ticket.user_id)
+        event = Event.query.get(ticket.event_id)
+        
+        # appending transaction data to the list
+        transaction_list.append({
+            'id': payment.id,
+            'user': user.username if user else 'Unknown',
+            'event': event.title if event else 'Unknown',
+            'amount': float(payment.amount),  # converts to float for JSON serialization
+            'method': payment.payment_method,
+            'status': payment.payment_status,
+            'date': payment.created_at.strftime('%Y-%m-%d %H:%M:%S')  # formats the date
+        })
+
+    return jsonify(transaction_list)
+
+# API end points
 
 api.add_resource(UserResource, '/users', '/users/<int:user_id>')
 api.add_resource(Login, '/login')
@@ -900,7 +966,7 @@ api.add_resource(VerifyOTP, '/otp/verify')
 api.add_resource(EventsList, '/events')
 api.add_resource(EventById, '/events/<int:event_id>')
 api.add_resource( OrganizerDashboard, '/organizer-dashboard')
-api.add_resource(CategoryResource, '/categories', '/categories/<int:category_id>')
+api.add_resource(Category, '/categories', '/categories/<int:category_id>')
 api.add_resource(TicketResource, '/tickets', '/tickets/<int:ticket_id>')
 api.add_resource(UserRole, '/user-role')
 api.add_resource(BookTicket, '/book-ticket')

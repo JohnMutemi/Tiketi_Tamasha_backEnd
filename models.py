@@ -219,3 +219,21 @@ class Customer(db.Model):
 
     def __repr__(self):
         return f'<Customer {self.name}>'
+    
+class Ticket(db.Model, SerializerMixin):
+    __tablename__ = 'tickets'
+    id = db.Column(db.Integer, primary_key=True)
+    event_id = db.Column(db.Integer, db.ForeignKey('events.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    ticket_type = db.Column(db.String(50), nullable=False)
+    price = db.Column(db.Numeric(10, 2), nullable=False)
+    purchased_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    quantity = db.Column(db.Integer, nullable=False)
+    status = db.Column(db.String(20), nullable=False)
+
+    event = db.relationship('Event', backref='tickets')  # add event relationship
+    customer = db.relationship('User', backref='tickets')  # add user relationship
+
+    payments = db.relationship('Payment', backref='ticket')
+
+    serialize_rules = ('-event.tickets', '-customer.tickets', '-payments.ticket')
