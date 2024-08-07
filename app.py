@@ -1,6 +1,3 @@
-
-import random
-import secrets
 from flask import Flask, request, jsonify, make_response, session, url_for,  render_template, redirect
 from flask_migrate import Migrate
 from flask_cors import CORS
@@ -10,6 +7,13 @@ from flask_jwt_extended.exceptions import RevokedTokenError
 from werkzeug.exceptions import NotFound
 from datetime import timedelta, datetime
 from jwt.exceptions import DecodeError
+# SMTP
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+
+from datetime import datetime, timedelta
+import random
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
@@ -20,7 +24,7 @@ app.config["SECRET_KEY"] = "JKSRVHJVFBSRDFV" + str(random.randint(1, 10000000000
 app.json.compact = False
 api = Api(app)
 
-from models import db, User, Event, Category, EventCategory, Payment, Ticket, RevokedToken, Customer
+from models import db, User, Event, Category, EventCategory, Payment, Ticket, RevokedToken
 db.init_app(app)
 jwt = JWTManager(app)
 migrate=Migrate(app, db)
@@ -148,8 +152,6 @@ class Login(Resource):
         user = User.query.filter_by(username=username).first()
 
         if user and user.check_password(password):
-            session['user_id'] = user.id
-
             # Set token expiration based on stay_logged_in
             if stay_logged_in:
                 expires = timedelta(days=30)  # Long expiration for stay logged in
@@ -167,6 +169,8 @@ class Login(Resource):
         else:
             return {"error": "Invalid username or password"}, 401
 
+
+# Handle Registration and Approval 
 
 class PublicRegister(Resource):
     def post(self):
@@ -191,10 +195,101 @@ class PublicRegister(Resource):
             db.session.add(new_user)
             db.session.commit()
 
-            return {'message': 'User registered successfully'}, 201
+            # Notify admin about the new registration
+            notify_admin(new_user)
+
+            return {'message': 'User registered successfully. Waiting for admin approval.'}, 201
         except Exception as e:
-            print(f"Error occurred during registration: {e}")
+            app.logger.error(f"Error occurred during registration: {e}")
             return {'message': 'Internal server error'}, 500
+
+def notify_admin(new_user):
+    admin_email = 'everlynmarius19@gmail.com'
+    subject = 'New User Registration Awaiting Approval'
+    body = f"""
+    A new user has registered and is awaiting your approval:
+    
+    Username: {new_user.username}
+    Email: {new_user.email}
+    Role: {new_user.role}
+    
+    Please log in to the admin panel to approve or reject this registration.
+    """
+    send_email(admin_email, subject, body)
+
+class GenerateOTP(Resource):
+    @jwt_required()
+    def post(self):
+        current_user = get_jwt_identity()
+        current_user_role = current_user['role']
+
+        if current_user_role != 'admin':
+            return {'message': 'Unauthorized. Only admins can generate OTP.'}, 403
+
+        user_id = request.form.get('user_id')
+
+        user = User.query.get(user_id)
+        if not user:
+            return {'message': 'User not found'}, 404
+
+        otp = generate_otp()
+        otp_expiration = datetime.utcnow() + timedelta(minutes=10)
+        user.otp = otp
+        user.otp_expiration = otp_expiration
+        db.session.commit()
+
+        # Send OTP email
+        subject = 'Your OTP Code'
+        body = f'Your OTP code is {otp}. It is valid for 10 minutes.'
+        send_email(user.email, subject, body)
+
+        return {'message': 'OTP sent to user successfully'}, 200
+
+def generate_otp():
+    # Generate a 6-digit OTP
+    return str(random.randint(100000, 999999))
+
+class VerifyOTP(Resource):
+
+    def post(self):
+        username = request.form.get('username')
+        otp = request.form.get('otp')
+
+        user = User.query.filter_by(username=username).first()
+
+        if user and user.otp == otp and user.otp_expiration > datetime.now():
+            session['user_id'] = user.id
+
+            # Clear OTP after successful verification
+            user.otp = None
+            user.otp_expiration = None
+            db.session.commit()
+
+            return {"message": "OTP verified, proceed to login"}, 200
+        else:
+            return {"error": "Invalid or expired OTP"}, 401
+
+def send_email(to, subject, body):
+    from_email = 'jmtutorsalp@gmail.com'
+    from_password = 'Jonny@1111' 
+    smtp_server = 'smtp.gmail.com'
+    smtp_port = 465 
+
+    msg = MIMEMultipart()
+    msg['From'] = from_email
+    msg['To'] = to
+    msg['Subject'] = subject
+
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        server = smtplib.SMTP(smtp_server, smtp_port)
+        server.starttls()  # Start TLS for security
+        server.login(from_email, from_password)
+        server.sendmail(from_email, to, msg.as_string())
+        server.close()
+    except Exception as e:
+        app.logger.error(f"Failed to send email: {e}")
 
 class AdminRegister(Resource):
     @jwt_required()
@@ -218,7 +313,7 @@ class AdminRegister(Resource):
             return {'message': 'Invalid role. Only "admin" role can be registered here.'}, 400
 
         # Check for the allowed email domain
-        allowed_domains = ['admin.com']
+        allowed_domains = ['gmail.com']
         email_domain = email.split('@')[-1]
 
         if email_domain not in allowed_domains:
@@ -257,7 +352,8 @@ class EventsList(Resource):
                 'total_tickets': event.total_tickets,
                 'remaining_tickets': event.remaining_tickets,
                 'tickets': [{'ticket_type': t.ticket_type, 'price': t.price, 'quantity': t.quantity, 'status': t.status} for t in tickets],
-                'image_url': event.image_url
+                'image_url':event.image_url
+    
             })
 
         return jsonify(event_list)
@@ -351,7 +447,7 @@ class EventById(Resource):
             'total_tickets': event.total_tickets,
             'remaining_tickets': event.remaining_tickets,
             'tickets': [{'ticket_type': t.ticket_type, 'price': t.price, 'quantity': t.quantity, 'status': t.status} for t in tickets],
-            'image_url': event.image_url  # Include image_url here
+            'image_url': event.image_url 
         }
         return(event_details)
 
@@ -686,6 +782,37 @@ class BookTicket(Resource):
             return jsonify({'message': 'Booking successful'}), 200
         
         return jsonify({'error': 'Unauthorized to book tickets'}), 403
+    
+# class Notifications(Resource):
+#     @jwt_required()
+#     def get(self):
+#         current_user = get_jwt_identity()
+#         if current_user['role'] != 'admin':
+#             return {'message': 'Access denied'}, 403
+
+#         notifications = Notification.query.filter_by(user_id=current_user['id']).all()
+#         notification_list = [{'id': n.id, 'message': n.message, 'timestamp': n.timestamp.isoformat()} for n in notifications]
+        
+#         return {'notifications': notification_list}, 200
+
+#     @jwt_required()
+#     def post(self):
+#         current_user = get_jwt_identity()
+#         if current_user['role'] != 'admin':
+#             return {'message': 'Access denied'}, 403
+
+#         message = request.json.get('message')
+#         if not message:
+#             return {'message': 'Message is required'}, 400
+
+#         try:
+#             notification = Notification(user_id=current_user['id'], message=message)
+#             db.session.add(notification)
+#             db.session.commit()
+#             return {'message': 'Notification sent successfully'}, 201
+#         except Exception as e:
+#             app.logger.error(f"Error occurred while sending notification: {e}")
+#             return {'message': 'Internal server error'}, 500
 class AdminDashboard(Resource):
     @jwt_required()
     def get(self):
@@ -755,6 +882,7 @@ class AdminDashboard(Resource):
 
         db.session.commit()
         return {'message': 'Event updated successfully'}, 200
+
     
 @jwt.user_identity_loader
 def user_identity_lookup(user):
@@ -767,6 +895,8 @@ api.add_resource(CheckSession, '/session')
 api.add_resource(Logout, '/logout')
 api.add_resource(PublicRegister, '/register')
 api.add_resource(AdminRegister, '/register/admin')
+api.add_resource(GenerateOTP, '/otp/generate')
+api.add_resource(VerifyOTP, '/otp/verify')
 api.add_resource(EventsList, '/events')
 api.add_resource(EventById, '/events/<int:event_id>')
 api.add_resource( OrganizerDashboard, '/organizer-dashboard')
@@ -775,6 +905,6 @@ api.add_resource(TicketResource, '/tickets', '/tickets/<int:ticket_id>')
 api.add_resource(UserRole, '/user-role')
 api.add_resource(BookTicket, '/book-ticket')
 api.add_resource(AdminDashboard, '/admin-dashboard', '/admin-dashboard/<int:user_id>', '/admin-dashboard/event/<int:event_id>')
-
+# api.add_resource(Notifications, '/notifications')
 if __name__ == '__main__':
     app.run(port=5555, debug=True)

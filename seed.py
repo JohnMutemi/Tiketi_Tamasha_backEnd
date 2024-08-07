@@ -5,9 +5,7 @@ from models import db, User, Event, Ticket, Payment, Category, EventCategory
 import random
 
 fake = Faker()
-
 # Define image URLs and descriptions related to event types
-
 EVENT_INFO = {
     'After Work Party': {
         'image_url': 'https://res.cloudinary.com/dhxtzhs6h/image/upload/v1722761652/hcszbtggl8emdtkv5oqp.png',
@@ -40,7 +38,6 @@ EVENT_INFO = {
 }
 
 EVENT_TYPES = list(EVENT_INFO.keys())
-
 def seed_data():
     with app.app_context():
         # Drop existing tables and create new ones
@@ -51,7 +48,6 @@ def seed_data():
         db.session.remove()
 
         # Create Users with plaintext passwords (only for testing, not for production)
-
         admin = User(username='admin', email='admin@example.com', role='admin')
         admin.set_password('adminpass')
 
@@ -91,7 +87,6 @@ def seed_data():
         db.session.commit()
 
         # Create Events using Faker with updated descriptions
-
         organizers = [organizer1, organizer2]
         events = []  # List to keep track of created events
 
@@ -165,6 +160,43 @@ def seed_data():
 
         # Commit all changes to the database
         db.session.commit()
+
+        # # Seed Notifications
+        # notifications = [
+        #     {'user_id': customer1.id, 'type': NotificationType.SYSTEM, 'message': 'System maintenance scheduled for tonight at 11 PM.', 'is_for_admin': False},
+        #     {'user_id': organizer1.id, 'type': NotificationType.EVENT_UPDATE, 'message': 'New event creation guidelines have been updated.', 'is_for_admin': False},
+        #     {'user_id': organizer2.id, 'type': NotificationType.REMINDER, 'message': 'Reminder: Submit your event reports by end of week.', 'is_for_admin': False},
+        #     {'user_id': customer2.id, 'type': NotificationType.USER_MESSAGE, 'message': 'You have a new message from the event organizer.', 'is_for_admin': False},
+        #     {'user_id': customer3.id, 'type': NotificationType.PURCHASE_CONFIRMATION, 'message': 'Your ticket purchase was successful. Thank you for your support!', 'is_for_admin': False},
+        #     {'user_id': customer4.id, 'type': NotificationType.REMINDER, 'message': 'Check out our new event categories and find something interesting!', 'is_for_admin': False}
+        # ]
+
+        # admin_notifications = [
+        #     {'user_id': admin.id, 'type': NotificationType.SYSTEM, 'message': 'System maintenance scheduled for tonight at 11 PM.', 'is_for_admin': True},
+        #     {'user_id': admin.id, 'type': NotificationType.EVENT_UPDATE, 'message': 'New event creation guidelines have been updated.', 'is_for_admin': True},
+        #     {'user_id': admin.id, 'type': NotificationType.REMINDER, 'message': 'Reminder: Review pending event approvals.', 'is_for_admin': True}
+        # ]
+
+        # for notification in notifications:
+        #     new_notification = Notification(
+        #         user_id=notification['user_id'],
+        #         type=notification['type'],
+        #         message=notification['message'],
+        #         is_for_admin=notification['is_for_admin']
+        #     )
+        #     db.session.add(new_notification)
+
+        # for admin_notification in admin_notifications:
+        #     new_notification = Notification(
+        #         user_id=admin_notification['user_id'],
+        #         type=admin_notification['type'],
+        #         message=admin_notification['message'],
+        #         is_for_admin=admin_notification['is_for_admin']
+        #     )
+        #     db.session.add(new_notification)
+
+        # # Commit notifications
+        # db.session.commit()
 
 if __name__ == '__main__':
     seed_data()

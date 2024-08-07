@@ -1,8 +1,8 @@
-"""make initial migrations
+"""migrate all table information
 
-Revision ID: 2c56397b0e06
+Revision ID: cf29aa667d80
 Revises: 
-Create Date: 2024-08-06 19:26:32.537600
+Create Date: 2024-08-07 08:58:01.855968
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = '2c56397b0e06'
+revision = 'cf29aa667d80'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -46,6 +46,8 @@ def upgrade():
     sa.Column('_password_hash', sa.String(length=128), nullable=False),
     sa.Column('role', sa.String(length=20), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=True),
+    sa.Column('otp', sa.String(length=6), nullable=True),
+    sa.Column('otp_expiration', sa.DateTime(), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('email'),
     sa.UniqueConstraint('username')
@@ -57,7 +59,7 @@ def upgrade():
     sa.Column('location', sa.String(length=100), nullable=False),
     sa.Column('start_time', sa.DateTime(), nullable=False),
     sa.Column('end_time', sa.DateTime(), nullable=False),
-    sa.Column('organizer_id', sa.Integer(), nullable=False),
+    sa.Column('organizer_id', sa.Integer(), nullable=True),
     sa.Column('total_tickets', sa.Integer(), nullable=False),
     sa.Column('remaining_tickets', sa.Integer(), nullable=False),
     sa.Column('created_at', sa.DateTime(), nullable=True),
