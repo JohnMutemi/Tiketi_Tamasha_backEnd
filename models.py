@@ -4,7 +4,6 @@ from sqlalchemy import MetaData
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.orm import validates
-from enum import Enum
 
 metadata = MetaData(naming_convention={
     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s"
@@ -23,12 +22,10 @@ class User(db.Model, SerializerMixin):
     otp = db.Column(db.String(6), nullable=True)
     otp_expiration = db.Column(db.DateTime, nullable=True)
 
-    events = db.relationship('Event', backref='organizer')
-    tickets = db.relationship('Ticket', backref='customer')
-    
-    # notifications = db.relationship('Notification', backref='user', foreign_keys='Notification.user_id')
+    events = db.relationship('Event', back_populates='organizer')
+    tickets = db.relationship('Ticket', back_populates='user')
 
-    serialize_rules = ('-_password_hash', '-events.organizer', '-tickets.customer')
+    serialize_rules = ('-_password_hash', '-events.organizer') 
 
     def __repr__(self):
         return f'<User {self.username}>'
@@ -69,7 +66,6 @@ class User(db.Model, SerializerMixin):
             'username': self.username,
             'email': self.email,
             'role': self.role,
-            'ticket_count': len(self.tickets),
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
         }
 
@@ -133,25 +129,12 @@ class Event(db.Model, SerializerMixin):
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
     image_url = db.Column(db.String(255), nullable=True)
 
-    tickets = db.relationship('Ticket', backref='event')
-    event_categories = db.relationship('EventCategory', backref='event')
+    organizer = db.relationship('User', back_populates='events')
+    tickets = db.relationship('Ticket', back_populates='event')
+    event_categories = db.relationship('EventCategory', back_populates='event')
 
     serialize_rules = ('-tickets.event', '-event_categories.event')
 
-class Ticket(db.Model, SerializerMixin):
-    __tablename__ = 'tickets'
-    id = db.Column(db.Integer, primary_key=True)
-    event_id = db.Column(db.Integer, db.ForeignKey('events.id'), nullable=False)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    ticket_type = db.Column(db.String(50), nullable=False)
-    price = db.Column(db.Numeric(10, 2), nullable=False)
-    purchased_at = db.Column(db.DateTime, default=db.func.current_timestamp())
-    quantity = db.Column(db.Integer, nullable=False)
-    status = db.Column(db.String(20), nullable=False)
-
-    payments = db.relationship('Payment', backref='ticket')
-
-    serialize_rules = ('-event.tickets', '-customer.tickets', '-payments.ticket')
 
 class Payment(db.Model, SerializerMixin):
     __tablename__ = 'payments'
@@ -162,6 +145,8 @@ class Payment(db.Model, SerializerMixin):
     payment_status = db.Column(db.String(20), nullable=False)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
 
+    ticket = db.relationship('Ticket', back_populates='payments')
+
     serialize_rules = ('-ticket.payments',)
 
 class Category(db.Model, SerializerMixin):
@@ -169,7 +154,7 @@ class Category(db.Model, SerializerMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), unique=True, nullable=False)
 
-    event_categories = db.relationship('EventCategory', backref='category')
+    event_categories = db.relationship('EventCategory', back_populates='category')
 
     serialize_rules = ('-event_categories.category',)
 
@@ -178,6 +163,9 @@ class EventCategory(db.Model, SerializerMixin):
     event_id = db.Column(db.Integer, db.ForeignKey('events.id'), primary_key=True)
     category_id = db.Column(db.Integer, db.ForeignKey('categories.id'), primary_key=True)
 
+    event = db.relationship('Event', back_populates='event_categories')
+    category = db.relationship('Category', back_populates='event_categories')
+
     serialize_rules = ('-event.event_categories', '-category.event_categories')
 
 class RevokedToken(db.Model):
@@ -185,41 +173,6 @@ class RevokedToken(db.Model):
     jti = db.Column(db.String(120), unique=True, nullable=False)
     revoked_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-# class NotificationType(Enum):
-#     SYSTEM = "system"
-#     EVENT_UPDATE = "event_update"
-#     USER_MESSAGE = "user_message"
-#     PURCHASE_CONFIRMATION = "purchase_confirmation"
-#     REMINDER = "reminder"
-
-# class Notification(db.Model, SerializerMixin):
-#     __tablename__ = 'notifications'
-#     id = db.Column(db.Integer, primary_key=True)
-#     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
-#     is_for_admin = db.Column(db.Boolean, default=False)  # Flag to indicate admin notifications
-#     type = db.Column(db.Enum(NotificationType), nullable=False)
-#     message = db.Column(db.String(255), nullable=False)
-#     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
-
-#     user = db.relationship('User', backref='notifications')
-
-#     serialize_rules = ('-user.notifications',)
-
-class Customer(db.Model):
-    __tablename__ = 'customers'
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(50), nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    phone = db.Column(db.String(20))
-
-    def __init__(self, name=None, email=None, phone=None):
-        self.name = name
-        self.email = email
-        self.phone = phone
-
-    def __repr__(self):
-        return f'<Customer {self.name}>'
-    
 class Ticket(db.Model, SerializerMixin):
     __tablename__ = 'tickets'
     id = db.Column(db.Integer, primary_key=True)
@@ -231,9 +184,8 @@ class Ticket(db.Model, SerializerMixin):
     quantity = db.Column(db.Integer, nullable=False)
     status = db.Column(db.String(20), nullable=False)
 
-    event = db.relationship('Event', backref='tickets')  # add event relationship
-    customer = db.relationship('User', backref='tickets')  # add user relationship
+    event = db.relationship('Event', back_populates='tickets')
+    user = db.relationship('User', back_populates='tickets')
+    payments = db.relationship('Payment', back_populates='ticket')
 
-    payments = db.relationship('Payment', backref='ticket')
-
-    serialize_rules = ('-event.tickets', '-customer.tickets', '-payments.ticket')
+    serialize_rules = ('-event_tickets.event', '-user.tickets', '-payments.ticket')

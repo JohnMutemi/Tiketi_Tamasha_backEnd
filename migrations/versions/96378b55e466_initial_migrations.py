@@ -1,8 +1,8 @@
-"""migrate all table information
+"""initial migrations
 
-Revision ID: cf29aa667d80
+Revision ID: 96378b55e466
 Revises: 
-Create Date: 2024-08-07 08:58:01.855968
+Create Date: 2024-08-08 09:19:41.728162
 
 """
 from alembic import op
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision = 'cf29aa667d80'
+revision = '96378b55e466'
 down_revision = None
 branch_labels = None
 depends_on = None
@@ -23,14 +23,6 @@ def upgrade():
     sa.Column('name', sa.String(length=50), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('name')
-    )
-    op.create_table('customers',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('name', sa.String(length=50), nullable=False),
-    sa.Column('email', sa.String(length=120), nullable=False),
-    sa.Column('phone', sa.String(length=20), nullable=True),
-    sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('email')
     )
     op.create_table('revoked_token',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -108,6 +100,5 @@ def downgrade():
     op.drop_table('events')
     op.drop_table('users')
     op.drop_table('revoked_token')
-    op.drop_table('customers')
     op.drop_table('categories')
     # ### end Alembic commands ###
