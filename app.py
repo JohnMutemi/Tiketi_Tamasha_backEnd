@@ -9,11 +9,12 @@ from datetime import timedelta, datetime
 from jwt.exceptions import DecodeError
 from utils import generate_totp_secret, generate_totp_token, send_email
 from datetime import datetime, timedelta
-import random, pyotp, os
+import random, pyotp
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]}})
-app.config['SQLALCHEMY_DATABASE_URI'] =os.environ.get('DATABASE_URI') 
+
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 app.config["JWT_SECRET_KEY"] = "fsbdgfnhgvjnvhmvh" + str(random.randint(1, 1000000000000))
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=1)
 app.config["SECRET_KEY"] = "JKSRVHJVFBSRDFV" + str(random.randint(1, 1000000000000))
