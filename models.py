@@ -173,6 +173,26 @@ class RevokedToken(db.Model):
     jti = db.Column(db.String(120), unique=True, nullable=False)
     revoked_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class BookedEvent(db.Model):
+    __tablename__ = 'booked_events'
+    
+    id = db.Column(db.Integer, primary_key=True)
+    image_url = db.Column(db.String(255), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    date = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    description = db.Column(db.Text, nullable=False)
+    
+    TICKET_TYPES = ['Early', 'VIP', 'Regular']
+    ticket_type = db.Column(db.Enum(*TICKET_TYPES, name="ticket_types"), nullable=False)
+    
+    PAYMENT_STATUS = ['Pending', 'Verified']
+    payment_status = db.Column(db.Enum(*PAYMENT_STATUS, name="payment_status"), nullable=False)
+    
+    def __repr__(self):
+        return f'<BookedEvent {self.name} - {self.ticket_type}>'
+
+
+
 class Ticket(db.Model, SerializerMixin):
     __tablename__ = 'tickets'
     id = db.Column(db.Integer, primary_key=True)

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 from flask import Flask, request, jsonify, make_response, session, url_for,  render_template, redirect
 from flask_migrate import Migrate
 from flask_cors import CORS
@@ -21,7 +22,7 @@ app.config["SECRET_KEY"] = "JKSRVHJVFBSRDFV" + str(random.randint(1, 10000000000
 app.json.compact = False
 api = Api(app)
 
-from models import db, User, Event, Category, Payment, Ticket, RevokedToken
+from models import db, User, Event, Category, Payment, Ticket, RevokedToken, BookedEvent
 db.init_app(app)
 jwt = JWTManager(app)
 migrate=Migrate(app, db)
@@ -967,6 +968,65 @@ def get_transactions():
 
     return jsonify(transaction_list)
 
+class BookedEventResource(Resource):
+    def get(self, event_id=None):
+        if event_id:
+            event = BookedEvent.query.get_or_404(event_id)
+            return {
+                'id': event.id,
+                'image_url': event.image_url,
+                'name': event.name,
+                'date': event.date.strftime('%Y-%m-%d %H:%M:%S'),
+                'description': event.description,
+                'ticket_type': event.ticket_type,
+                'payment_status': event.payment_status
+            }
+        else:
+            events = BookedEvent.query.all()
+            return [{
+                'id': event.id,
+                'image_url': event.image_url,
+                'name': event.name,
+                'date': event.date.strftime('%Y-%m-%d %H:%M:%S'),
+                'description': event.description,
+                'ticket_type': event.ticket_type,
+                'payment_status': event.payment_status
+            } for event in events]
+
+    def post(self):
+        data = request.json
+        new_event = BookedEvent(
+            image_url=data.get('image_url'),
+            name=data.get('name'),
+            date=datetime.strptime(data.get('date'), '%Y-%m-%d %H:%M:%S'),
+            description=data.get('description'),
+            ticket_type=data.get('ticket_type'),
+            payment_status=data.get('payment_status')
+        )
+        db.session.add(new_event)
+        db.session.commit()
+        return {'message': 'Event created successfully'}, 201
+
+    def put(self, event_id):
+        data = request.json
+        event = BookedEvent.query.get_or_404(event_id)
+
+        event.image_url = data.get('image_url', event.image_url)
+        event.name = data.get('name', event.name)
+        event.date = datetime.strptime(data.get('date'), '%Y-%m-%d %H:%M:%S')
+        event.description = data.get('description', event.description)
+        event.ticket_type = data.get('ticket_type', event.ticket_type)
+        event.payment_status = data.get('payment_status', event.payment_status)
+
+        db.session.commit()
+        return {'message': 'Event updated successfully'}
+
+    def delete(self, event_id):
+        event = BookedEvent.query.get_or_404(event_id)
+        db.session.delete(event)
+        db.session.commit()
+        return {'message': 'Event deleted successfully'}
+
 # API end points
 api.add_resource(CategoryListResource, '/categories')
 api.add_resource(CategoryResource, '/categories/<int:category_id>')
@@ -985,6 +1045,7 @@ api.add_resource(EventsList, '/events')
 api.add_resource(EventById, '/events/<int:event_id>')
 api.add_resource(GenerateOTP, '/request-otp')
 api.add_resource(VerifyOTP, '/verify-otp')
+api.add_resource(BookedEventResource, '/api/booked-events', '/api/booked-events/<int:event_id>')
 
 # api.add_resource(Notifications, '/notifications')
 if __name__ == '__main__':
