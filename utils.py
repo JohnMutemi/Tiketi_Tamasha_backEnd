@@ -1,40 +1,34 @@
-import pyotp
+import os
+import random
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from flask import current_app
 
-def generate_totp_secret():
-    """Generates a new TOTP secret key."""
-    return pyotp.random_base32()
+def generate_otp():
+    """Generate a 6-digit OTP."""
+    return str(random.randint(100000, 999999))
 
-def generate_totp_token(secret, interval=200):
-    """Generates a TOTP token based on the given secret and interval."""
-    totp = pyotp.TOTP(secret, interval=interval)
-    return totp.now()
-
-def send_email(to_email, subject, body):
-    """Sends an email with the provided subject and body."""
-    smtp_server = "smtp.gmail.com"
+def send_otp_to_email(user_email, otp_code):
+    """Send an OTP to the specified email address."""
+    smtp_server = 'smtp.gmail.com'
     smtp_port = 587
-    from_email = "jmtutorsalp@gmail.com"
-    from_password = "Jonny@1111"
+    smtp_username = 'tiketitamasha@gmail.com'  
+    smtp_password = 'ynmy vlwl dmui labp '
 
-    msg = MIMEMultipart()
-    msg["From"] = from_email
-    msg["To"] = to_email
-    msg["Subject"] = subject
-
-    msg.attach(MIMEText(body, "plain"))
+    subject = "Your OTP Code"
+    body = f"Your OTP code is: {otp_code}"
+    message = MIMEMultipart()
+    message['From'] = smtp_username
+    message['To'] = user_email
+    message['Subject'] = subject
+    message.attach(MIMEText(body, 'plain'))
 
     try:
-        server = smtplib.SMTP(smtp_server, smtp_port)
-        server.starttls()
-        server.login(from_email, from_password)
-        server.sendmail(from_email, to_email, msg.as_string())
-        server.quit()
-        print(f"Email sent to {to_email}")  # Debug print statement
-        return True
-
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls() 
+            server.login(smtp_username, smtp_password)
+            server.send_message(message)
+        current_app.logger.info(f"OTP sent to {user_email}")
     except Exception as e:
-        print(f"Failed to send email: {e}")  # Debug print statement
-        return False
+        current_app.logger.error(f"Failed to send OTP: {e}")

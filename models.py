@@ -4,6 +4,7 @@ from sqlalchemy import MetaData
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.orm import validates
+from sqlalchemy.orm import validates, relationship, backref
 
 metadata = MetaData(naming_convention={
     "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s"
@@ -22,8 +23,8 @@ class User(db.Model, SerializerMixin):
     otp = db.Column(db.String(6), nullable=True)
     otp_expiration = db.Column(db.DateTime, nullable=True)
 
-    events = db.relationship('Event', back_populates='organizer')
-    tickets = db.relationship('Ticket', back_populates='user')
+    events = db.relationship('Event', back_populates='organizer', cascade='all, delete-orphan')
+    tickets = db.relationship('Ticket', back_populates='user', cascade='all, delete-orphan')
 
     serialize_rules = ('-_password_hash', '-events.organizer') 
 
@@ -130,8 +131,8 @@ class Event(db.Model, SerializerMixin):
     image_url = db.Column(db.String(255), nullable=True)
 
     organizer = db.relationship('User', back_populates='events')
-    tickets = db.relationship('Ticket', back_populates='event')
-    event_categories = db.relationship('EventCategory', back_populates='event')
+    tickets = db.relationship('Ticket', back_populates='event', cascade='all, delete-orphan')
+    event_categories = db.relationship('EventCategory', back_populates='event', cascade='all, delete-orphan')
 
     serialize_rules = ('-tickets.event', '-event_categories.event')
 
@@ -154,7 +155,7 @@ class Category(db.Model, SerializerMixin):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), unique=True, nullable=False)
 
-    event_categories = db.relationship('EventCategory', back_populates='category')
+    event_categories = db.relationship('EventCategory', back_populates='category', cascade='all, delete-orphan')
 
     serialize_rules = ('-event_categories.category',)
 
@@ -206,6 +207,6 @@ class Ticket(db.Model, SerializerMixin):
 
     event = db.relationship('Event', back_populates='tickets')
     user = db.relationship('User', back_populates='tickets')
-    payments = db.relationship('Payment', back_populates='ticket')
+    payments = db.relationship('Payment', back_populates='ticket', cascade='all, delete-orphan')
 
     serialize_rules = ('-event_tickets.event', '-user.tickets', '-payments.ticket')
