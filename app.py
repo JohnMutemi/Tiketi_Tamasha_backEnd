@@ -1,14 +1,15 @@
-from flask import Flask, request, jsonify, make_response, session, send_file, redirect, current_app
+from flask import Flask, request, jsonify, make_response, session, send_file, current_app
 from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_restful import Api, Resource
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, get_jwt
-from flask_jwt_extended.exceptions import RevokedTokenError
+# from flask_jwt_extended.exceptions import RevokedTokenError
 from werkzeug.exceptions import NotFound
 from datetime import timedelta, datetime
+# from jwt.exceptions import DecodeError
 from utils import generate_otp, send_otp_to_email
 from datetime import datetime, timedelta
-import random, pyotp, requests, base64, os
+import random, os
 from flask_otp import OTP
 from sqlalchemy.orm import joinedload
 from intasend import IntaSend
