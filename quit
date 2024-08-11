@@ -1,0 +1,11 @@
+                                              List of databases
+        Name         |          Owner           | Encoding |  Collate   |   Ctype    |   Access privileges   
+---------------------+--------------------------+----------+------------+------------+-----------------------
+ postgres            | postgres                 | UTF8     | en_US.UTF8 | en_US.UTF8 | 
+ template0           | postgres                 | UTF8     | en_US.UTF8 | en_US.UTF8 | =c/postgres          +
+                     |                          |          |            |            | postgres=CTc/postgres
+ template1           | postgres                 | UTF8     | en_US.UTF8 | en_US.UTF8 | =c/postgres          +
+                     |                          |          |            |            | postgres=CTc/postgres
+ tiketi_tamasha_2lv6 | tiketi_tamasha_2lv6_user | UTF8     | en_US.UTF8 | en_US.UTF8 | 
+(4 rows)
+

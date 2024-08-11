@@ -9,7 +9,7 @@ flask-sqlalchemy = "*"
 flask-cors = "==4.0.1"
 flask-restful = "*"
 flask-migrate = "*"
-sqlalchemy-serializer = "==1.4.12"
+sqlalchemy-serializer = "*"
 flask-jwt-extended = "*"
 alembic = "==1.13.2"
 aniso8601 = "==9.0.1"
@@ -31,6 +31,8 @@ werkzeug = "==3.0.3"
 zipp = "==3.19.2"
 pyotp = "*"
 faker = "*"
+gunicorn = "*"
+psycopg2-binary = "*"
 
 [dev-packages]
 

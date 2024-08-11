@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, make_response, session, send_file,  render_template, redirect, current_app
+from flask import Flask, request, jsonify, make_response, session, send_file, redirect, current_app
 from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_restful import Api, Resource
@@ -9,7 +9,7 @@ from datetime import timedelta, datetime
 from jwt.exceptions import DecodeError
 from utils import generate_otp, send_otp_to_email
 from datetime import datetime, timedelta
-import random, pyotp, requests, base64
+import random, pyotp, requests, base64, os
 from flask_otp import OTP
 from sqlalchemy.orm import joinedload
 from intasend import IntaSend
@@ -25,7 +25,9 @@ CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "
 
 app.config['INTASEND_PUBLIC_KEY'] = 'ISPubKey_live_bdabab19-cd29-4975-96dd-87f04c49edb9'
 app.config['INTASEND_PRIVATE_KEY'] = 'ISSecretKey_live_128af563-9a65-4984-bccb-29a32b2589a5'
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URI') # 'sqlite:///app.db'
+
 app.config["JWT_SECRET_KEY"] = "fsbdgfnhgvjnvhmvh" + str(random.randint(1, 1000000000000))
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=1)
 app.config["SECRET_KEY"] = "JKSRVHJVFBSRDFV" + str(random.randint(1, 1000000000000))
@@ -66,8 +68,9 @@ def show_cookies(key):
     response.set_cookie('cookie_name', 'cookie')
     return response
 @app.route('/')
+
 def index():
-    return render_template('index.html')
+    return '<h3> Tiketi Tamasha Backend Repository</h3>'
 
 class UserResource(Resource):
     def post(self):
