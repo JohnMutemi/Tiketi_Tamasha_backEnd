@@ -3,10 +3,10 @@ from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_restful import Api, Resource
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, get_jwt
-# from flask_jwt_extended.exceptions import RevokedTokenError
+from flask_jwt_extended.exceptions import RevokedTokenError
 from werkzeug.exceptions import NotFound
 from datetime import timedelta, datetime
-# from jwt.exceptions import DecodeError
+from jwt.exceptions import InvalidTokenError
 from utils import generate_otp, send_otp_to_email
 from datetime import datetime, timedelta
 import random, os
@@ -472,6 +472,15 @@ def check_if_token_revoked(jwt_header, jwt_payload):
     token = RevokedToken.query.filter_by(jti=jti).first()
     return token is not None
 
+@app.route('/protected', methods=['GET'])
+@jwt_required()
+def protected():
+    try:
+        token = get_jwt()
+        # Process token
+    except InvalidTokenError:
+        return jsonify({"msg": "Invalid token"}), 401
+    
 class Logout(Resource):
     @jwt_required()
     def post(self):
