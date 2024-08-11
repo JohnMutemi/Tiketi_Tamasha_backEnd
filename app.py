@@ -6,7 +6,6 @@ from flask_jwt_extended import JWTManager, create_access_token, jwt_required, ge
 from flask_jwt_extended.exceptions import RevokedTokenError
 from werkzeug.exceptions import NotFound
 from datetime import timedelta, datetime
-from jwt.exceptions import DecodeError
 from utils import generate_otp, send_otp_to_email
 from datetime import datetime, timedelta
 import random, pyotp, requests, base64, os
