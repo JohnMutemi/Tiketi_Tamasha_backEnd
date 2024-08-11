@@ -31,3 +31,4 @@ typing-extensions==4.12.2; python_version >= '3.8'
 werkzeug==3.0.3; python_version >= '3.8'
 zipp==3.19.2; python_version >= '3.8'
 requests==2.32.3
+flask-otp==1.2
