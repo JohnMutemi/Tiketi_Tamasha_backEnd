@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, make_response, session, url_for,  render_template, redirect, current_app
+from flask import Flask, request, jsonify, make_response, session, send_file,  render_template, redirect, current_app
 from flask_migrate import Migrate
 from flask_cors import CORS
 from flask_restful import Api, Resource
@@ -9,8 +9,13 @@ from datetime import timedelta, datetime
 from jwt.exceptions import DecodeError
 from utils import generate_otp, send_otp_to_email
 from datetime import datetime, timedelta
-import random, pyotp
+import random, pyotp, requests, base64
 from flask_otp import OTP
+from sqlalchemy.orm import joinedload
+from intasend import IntaSend
+from io import BytesIO
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
 
 otp = OTP()
 otp.init_app(current_app)
@@ -18,12 +23,15 @@ otp.init_app(current_app)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]}})
 
+app.config['INTASEND_PUBLIC_KEY'] = 'ISPubKey_live_bdabab19-cd29-4975-96dd-87f04c49edb9'
+app.config['INTASEND_PRIVATE_KEY'] = 'ISSecretKey_live_128af563-9a65-4984-bccb-29a32b2589a5'
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 app.config["JWT_SECRET_KEY"] = "fsbdgfnhgvjnvhmvh" + str(random.randint(1, 1000000000000))
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=1)
 app.config["SECRET_KEY"] = "JKSRVHJVFBSRDFV" + str(random.randint(1, 1000000000000))
 app.json.compact = False
 api = Api(app)
+
 
 from models import db, User, Event, Category, Payment, Ticket, RevokedToken
 db.init_app(app)
@@ -62,16 +70,34 @@ def index():
     return render_template('index.html')
 
 class UserResource(Resource):
+    def post(self):
+        # Create a new user account with form data
+        data = request.form
+
+        if 'email' not in data or 'password' not in data:
+            return {'error': 'Email and password required'}, 400
+
+        user = User(
+            email=data['email'],
+            password=data['password'] 
+        )
+        db.session.add(user)
+        db.session.commit()
+        
+        return {'message': 'User created successfully', 'user_id': user.id}, 201
+
     @jwt_required()
     def get(self, user_id=None):
+        # Get user details, or list all users if no user_id is provided
         user_identity = get_jwt_identity()
         current_user = User.query.get(user_identity['user_id'])
 
         if not current_user:
             return {'error': 'User not found'}, 404
 
-        if current_user.role != 'admin':
-            return {'message': 'Access denied'}, 403
+        if current_user.role != 'admin' and user_id:
+            if user_id != current_user.id:
+                return {'message': 'Access denied'}, 403
 
         if user_id:
             user = User.query.get(user_id)
@@ -81,6 +107,61 @@ class UserResource(Resource):
         
         users = User.query.all()
         return [user.to_dict() for user in users], 200
+
+    @jwt_required()
+    def patch(self, user_id):
+        print(f"Received PATCH request for user ID: {user_id}")
+        user_identity = get_jwt_identity()
+        current_user = User.query.get(user_identity['user_id'])
+
+        if not current_user:
+            print("Current user not found.")
+            return {'error': 'User not found'}, 404
+
+        if not current_user.is_admin():
+            print("Access denied for non-admin user.")
+            return {'message': 'Access denied'}, 403
+
+        user = User.query.get(user_id)
+        if not user:
+            print(f"User with ID {user_id} not found.")
+            return {'error': 'User not found'}, 404
+
+        data = request.get_json()
+        print(f"Data received for update: {data}")
+
+        try:
+            for key, value in data.items():
+                if hasattr(user, key):
+                    setattr(user, key, value)
+            db.session.commit()
+            print(f"User with ID {user_id} updated successfully.")
+            return user.to_dict(), 200
+        except Exception as e:
+            print(f"Error updating user: {e}")
+            db.session.rollback()
+            return {'error': 'Error updating user'}, 500
+
+    @jwt_required()
+    def delete(self, user_id):
+        """Delete a user account"""
+        user_identity = get_jwt_identity()
+        current_user = User.query.get(user_identity['user_id'])
+
+        if not current_user:
+            return {'error': 'User not found'}, 404
+
+        if current_user.role != 'admin':
+            return {'message': 'Access denied'}, 403
+
+        user = User.query.get(user_id)
+
+        if not user:
+            return {'error': 'User not found'}, 404
+
+        db.session.delete(user)
+        db.session.commit()
+        return {'message': 'User deleted successfully'}, 200
      
 class Login(Resource):
 
@@ -118,6 +199,8 @@ class PublicRegister(Resource):
         email = request.form.get('email')
         role = request.form.get('role')
 
+        print(f"Received registration data: username={username}, email={email}, role={role}")
+
         if not username or not password or not email or not role:
             return {'message': 'Username, password, role, and email are required'}, 400
         
@@ -130,17 +213,20 @@ class PublicRegister(Resource):
 
         # Generate and send OTP
         otp_code = generate_otp()
+        print(f"Generated OTP: {otp_code}")
         send_otp_to_email(email, otp_code)
 
         # Temporarily store the OTP and user details in session
         session['otp'] = otp_code
         session['user_details'] = {'username': username, 'password': password, 'role': role, 'email': email}
-        
+        print(f"Stored OTP and user details in session: {session['user_details']}")
+
         return {'message': 'OTP sent to email. Please verify.'}, 200
-    
+
 class VerifyOTP(Resource):
     def post(self):
         entered_otp = request.form.get('otp')
+        print(f"Received OTP for verification: {entered_otp}")
 
         if not entered_otp:
             return {'message': 'OTP is required'}, 400
@@ -148,6 +234,8 @@ class VerifyOTP(Resource):
         # Retrieve stored OTP and user details
         stored_otp = session.get('otp')
         user_details = session.get('user_details')
+        print(f"Stored OTP: {stored_otp}")
+        print(f"Stored user details: {user_details}")
 
         if not stored_otp or stored_otp != entered_otp:
             return {'message': 'Invalid OTP'}, 400
@@ -160,15 +248,17 @@ class VerifyOTP(Resource):
             new_user.set_password(user_details['password'])
             db.session.add(new_user)
             db.session.commit()
+            print(f"User registered successfully: {new_user.username}")
 
             # Clean up session
             session.pop('otp', None)
             session.pop('user_details', None)
 
-            return {'message': 'User registered and Logged in successfully'}, 201
+            return {'message': 'User registered and logged in successfully'}, 201
         except Exception as e:
             current_app.logger.error(f"Error occurred during OTP verification: {e}")
             return {'message': 'Internal server error'}, 500
+
     
 class AdminRegister(Resource):
     @jwt_required()
@@ -606,31 +696,170 @@ def user_identity_lookup(user):
     return {'user_id': user['user_id'], 'role': user['role']}
 
 
-def get_transactions():
-    # queries the Payment model to fetch all transactions
-    transactions = Payment.query.all()
+class Transaction(Resource):
+    def get(self):
+        # Get the user_id from the query parameters (for user-specific history)
+        user_id = request.args.get('user_id')
 
-    transaction_list = []
-    for payment in transactions:
-        # fetches the associated ticket
-        ticket = Ticket.query.get(payment.ticket_id)
-        user = User.query.get(ticket.user_id)
-        event = Event.query.get(ticket.event_id)
-        
-        # appending transaction data to the list
-        transaction_list.append({
-            'id': payment.id,
-            'user': user.username if user else 'Unknown',
-            'event': event.title if event else 'Unknown',
-            'amount': float(payment.amount),  
-            'method': payment.payment_method,
-            'status': payment.payment_status,
-            'date': payment.created_at.strftime('%Y-%m-%d %H:%M:%S')  
-        })
+        # Query transactions with eager loading to optimize database access
+        transactions_query = Payment.query.options(
+            joinedload(Payment.ticket).joinedload(Ticket.user),
+            joinedload(Payment.ticket).joinedload(Ticket.event)
+        )
 
-    return jsonify(transaction_list)
+        if user_id:
+            # Filter by user_id if provided
+            transactions_query = transactions_query.filter(Ticket.user_id == user_id)
 
+        transactions = transactions_query.all()
+
+        transaction_list = []
+        for payment in transactions:
+            ticket = payment.ticket
+            user = ticket.user
+            event = ticket.event
+            
+            transaction_list.append({
+                'id': payment.id,
+                'user': user.username if user else 'Unknown',
+                'event': event.title if event else 'Unknown',
+                'amount': float(payment.amount),  
+                'method': payment.payment_method,
+                'status': payment.payment_status,
+                'date': payment.created_at.strftime('%Y-%m-%d %H:%M:%S')  
+            })
+
+        return jsonify(transaction_list)
+
+    def post(self):
+        # Extract data from the request
+        data = request.get_json()
+        payment_id = data.get('payment_id')
+        action = data.get('action')
+
+        if action not in ['approve', 'deny']:
+            return {'message': 'Invalid action'}, 400
+
+        # Find the payment by id
+        payment = Payment.query.get(payment_id)
+
+        if not payment:
+            return {'message': 'Payment not found'}, 404
+
+        # Handle the refund logic based on the action
+        if action == 'approve':
+            payment.payment_status = 'refunded'
+        elif action == 'deny':
+            payment.payment_status = 'refund_denied'
+
+        # Commit the changes to the database
+        db.session.commit()
+
+        return {'message': f'Refund {action}d successfully'}, 200
+    
+
+class Mpesa(Resource):
+    def __init__(self):
+        self.intasend = IntaSend()
+
+    def post(self):
+        data = request.json
+        phone_number = data.get('phone_number')
+        amount = data.get('amount')
+
+        if not phone_number or not amount:
+            return jsonify({'error': 'Phone number and amount are required.'}), 400
+
+        try:
+            response = self.intasend.initiate_payment(amount, phone_number, 'http://127.0.0.1:5555/callback-url')
+
+            # Save payment details
+            payment = Payment(
+                amount=amount,
+                payment_method='MPESA',
+                payment_status='Pending',
+                mpesa_transaction_id=response.get('transaction_id'),
+                phone_number=phone_number
+            )
+            db.session.add(payment)
+            db.session.commit()
+
+            return jsonify(response)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+    def get(self, payment_id):
+        try:
+            response = self.intasend.verify_payment(payment_id)
+            return jsonify(response)
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+
+# Define the routes
+@app.route('/initiate-transaction', methods=['POST'])
+def initiate_transaction():
+    return Mpesa().post()
+
+@app.route('/callback-url', methods=['POST'])
+def callback_url():
+    json_data = request.get_json()
+    transaction_id = json_data.get('transaction_id')
+    payment_status = json_data.get('status')
+
+    payment = Payment.query.filter_by(mpesa_transaction_id=transaction_id).first()
+    if payment:
+        if payment_status == 'success':
+            payment.payment_status = 'Completed'
+        else:
+            payment.payment_status = 'Failed'
+        db.session.commit()
+
+    return jsonify({"status": payment_status}), 200
+
+@app.route('/verify-payment/<payment_id>', methods=['GET'])
+def verify_payment(payment_id):
+    return Mpesa().get(payment_id)
+
+
+@app.route('/download-receipt/<int:payment_id>', methods=['GET'])
+def download_receipt(payment_id):
+    try:
+        # Look up the payment in your database using the payment_id
+        payment = Payment.query.get(payment_id)
+
+        if not payment:
+            return jsonify({"error": "Payment not found"}), 404
+
+        # Create a PDF buffer in memory
+        pdf_buffer = BytesIO()
+
+        # Create a canvas to generate the PDF
+        pdf = canvas.Canvas(pdf_buffer, pagesize=letter)
+        pdf.setTitle("Payment Receipt")
+
+        # Add text and details to the PDF
+        pdf.drawString(100, 750, "Payment Receipt")
+        pdf.drawString(100, 730, f"Payment ID: {payment.id}")
+        pdf.drawString(100, 710, f"Amount: {payment.amount} KES")
+        pdf.drawString(100, 690, f"Payment Method: {payment.payment_method}")
+        pdf.drawString(100, 670, f"Payment Status: {payment.payment_status}")
+        pdf.drawString(100, 650, f"Date: {payment.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
+
+        # Finish the PDF
+        pdf.showPage()
+        pdf.save()
+
+        # Move the buffer position to the start
+        pdf_buffer.seek(0)
+
+        # Send the PDF as a file download
+        return send_file(pdf_buffer, as_attachment=True, download_name=f"receipt_{payment_id}.pdf", mimetype='application/pdf')
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 # API end points
+api.add_resource(Mpesa, '/mpesa', '/mpesa/<string:payment_id>')
+api.add_resource(Transaction, '/payments')
 api.add_resource(CategoryListResource, '/categories')
 api.add_resource(CategoryResource, '/categories/<int:category_id>')
 api.add_resource(UserResource, '/users', '/users/<int:user_id>')

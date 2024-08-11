@@ -5,6 +5,17 @@ from models import db, User, Event, Ticket, Payment, Category, EventCategory
 import random
 
 fake = Faker()
+
+# Define conversion rate from USD to KSh (example rate: 1 USD = 145 KSh)
+USD_TO_KSH_CONVERSION_RATE = 145
+
+# Define price ranges for different ticket types in USD
+TICKET_PRICE_RANGES = {
+    'Early Booking': (10.0, 30.0),  # $10 to $30
+    'Regular': (30.0, 60.0),        # $30 to $60
+    'VIP': (60.0, 100.0)            # $60 to $100
+}
+
 # Define image URLs and descriptions related to event types
 EVENT_INFO = {
     'After Work Party': {
@@ -38,6 +49,14 @@ EVENT_INFO = {
 }
 
 EVENT_TYPES = list(EVENT_INFO.keys())
+
+def generate_ticket_price(ticket_type):
+    """Generate ticket price in KSh based on the ticket type."""
+    min_price, max_price = TICKET_PRICE_RANGES[ticket_type]
+    price_usd = random.uniform(min_price, max_price)
+    price_ksh = price_usd * USD_TO_KSH_CONVERSION_RATE
+    return round(price_ksh, 2)
+
 def seed_data():
     with app.app_context():
         # Drop existing tables and create new ones
@@ -134,15 +153,16 @@ def seed_data():
         # Create Tickets for Each Event
         for event in events:
             # Ensure each event gets at least one ticket
-            ticket = Ticket(
-                event_id=event.id,
-                user_id=random.choice([customer1.id, customer2.id, customer3.id, customer4.id]),
-                ticket_type=random.choice(['Early Booking', 'Regular', 'VIP']),
-                price=random.uniform(20.0, 100.0),  # Random price between $20 and $100
-                quantity=random.randint(1, 3),
-                status='pending'
-            )
-            db.session.add(ticket)
+            for ticket_type in ['Early Booking', 'Regular', 'VIP']:
+                ticket = Ticket(
+                    event_id=event.id,
+                    user_id=random.choice([customer1.id, customer2.id, customer3.id, customer4.id]),
+                    ticket_type=ticket_type,
+                    price=generate_ticket_price(ticket_type),
+                    quantity=random.randint(1, 3),
+                    status='pending'
+                )
+                db.session.add(ticket)
 
         # Commit the tickets
         db.session.commit()
@@ -161,7 +181,6 @@ def seed_data():
         # Commit all changes to the database
         db.session.commit()
 
-       
 if __name__ == '__main__':
     seed_data()
     print("Database seeded!")

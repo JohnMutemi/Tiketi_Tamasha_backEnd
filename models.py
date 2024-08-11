@@ -145,10 +145,13 @@ class Payment(db.Model, SerializerMixin):
     payment_method = db.Column(db.String(50), nullable=False)
     payment_status = db.Column(db.String(20), nullable=False)
     created_at = db.Column(db.DateTime, default=db.func.current_timestamp())
+    mpesa_transaction_id = db.Column(db.String(255))
+    phone_number = db.Column(db.String(20))  
 
     ticket = db.relationship('Ticket', back_populates='payments')
 
     serialize_rules = ('-ticket.payments',)
+
 
 class Category(db.Model, SerializerMixin):
     __tablename__ = 'categories'
