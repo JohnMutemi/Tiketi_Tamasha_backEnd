@@ -33,7 +33,7 @@ app.json.compact = False
 api = Api(app)
 
 
-from models import db, User, Event, Category, Payment, Ticket, RevokedToken
+from models import db, User, Event, Category, Payment, Ticket, RevokedToken, BookedEvent
 db.init_app(app)
 jwt = JWTManager(app)
 migrate=Migrate(app, db)
@@ -857,6 +857,65 @@ def download_receipt(payment_id):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+class BookedEventResource(Resource):
+    def get(self, event_id=None):
+        if event_id:
+            event = BookedEvent.query.get_or_404(event_id)
+            return {
+                'id': event.id,
+                'image_url': event.image_url,
+                'name': event.name,
+                'date': event.date.strftime('%Y-%m-%d %H:%M:%S'),
+                'description': event.description,
+                'ticket_type': event.ticket_type,
+                'payment_status': event.payment_status
+            }
+        else:
+            events = BookedEvent.query.all()
+            return [{
+                'id': event.id,
+                'image_url': event.image_url,
+                'name': event.name,
+                'date': event.date.strftime('%Y-%m-%d %H:%M:%S'),
+                'description': event.description,
+                'ticket_type': event.ticket_type,
+                'payment_status': event.payment_status
+            } for event in events]
+
+    def post(self):
+        data = request.json
+        new_event = BookedEvent(
+            image_url=data.get('image_url'),
+            name=data.get('name'),
+            date=datetime.strptime(data.get('date'), '%Y-%m-%d %H:%M:%S'),
+            description=data.get('description'),
+            ticket_type=data.get('ticket_type'),
+            payment_status=data.get('payment_status')
+        )
+        db.session.add(new_event)
+        db.session.commit()
+        return {'message': 'Event created successfully'}, 201
+
+    def put(self, event_id):
+        data = request.json
+        event = BookedEvent.query.get_or_404(event_id)
+
+        event.image_url = data.get('image_url', event.image_url)
+        event.name = data.get('name', event.name)
+        event.date = datetime.strptime(data.get('date'), '%Y-%m-%d %H:%M:%S')
+        event.description = data.get('description', event.description)
+        event.ticket_type = data.get('ticket_type', event.ticket_type)
+        event.payment_status = data.get('payment_status', event.payment_status)
+
+        db.session.commit()
+        return {'message': 'Event updated successfully'}
+
+    def delete(self, event_id):
+        event = BookedEvent.query.get_or_404(event_id)
+        db.session.delete(event)
+        db.session.commit()
+        return {'message': 'Event deleted successfully'}
+
 # API end points
 api.add_resource(Mpesa, '/mpesa', '/mpesa/<string:payment_id>')
 api.add_resource(Transaction, '/payments')
@@ -875,6 +934,7 @@ api.add_resource(BookTicket, '/book-ticket')
 api.add_resource(AdminDashboard, '/admin-dashboard', '/admin-dashboard/<int:user_id>', '/admin-dashboard/events/<int:event_id>')
 api.add_resource(EventsResource, '/events','/events/<int:event_id>')
 api.add_resource(VerifyOTP, '/verify-otp')
+api.add_resource(BookedEventResource, '/api/booked-events', '/api/booked-events/<int:event_id>')
 
 if __name__ == '__main__':
     app.run(port=5555, debug=True)
