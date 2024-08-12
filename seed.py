@@ -152,6 +152,7 @@ def seed_data():
         db.session.commit()
 
         # Create Tickets for Each Event
+        tickets = []
         for event in events:
             # Ensure each event gets at least one ticket
             for ticket_type in ['Early Booking', 'Regular', 'VIP']:
@@ -164,13 +165,15 @@ def seed_data():
                     status='pending'
                 )
                 db.session.add(ticket)
+                tickets.append(ticket)  # Keep track of created tickets
 
         # Commit the tickets
         db.session.commit()
 
-        # Create Payments
-        tickets = Ticket.query.all()
-        for ticket in tickets:
+        # Create Payments for a subset of tickets
+        num_payments = 5  
+        tickets_to_pay = random.sample(tickets, num_payments)
+        for ticket in tickets_to_pay:
             payment = Payment(
                 ticket_id=ticket.id,
                 amount=ticket.price * ticket.quantity,

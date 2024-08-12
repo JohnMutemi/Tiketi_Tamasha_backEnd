@@ -9,10 +9,10 @@ from datetime import timedelta, datetime
 from jwt.exceptions import InvalidTokenError
 from utils import generate_otp, send_otp_to_email
 from datetime import datetime, timedelta
-import random, os
+import random, os, requests
 from flask_otp import OTP
 from sqlalchemy.orm import joinedload
-from intasend import IntaSend
+from intasend import APIService
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -23,11 +23,9 @@ otp.init_app(current_app)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]}})
 
-app.config['INTASEND_PUBLIC_KEY'] = 'ISPubKey_live_bdabab19-cd29-4975-96dd-87f04c49edb9'
-app.config['INTASEND_PRIVATE_KEY'] = 'ISSecretKey_live_128af563-9a65-4984-bccb-29a32b2589a5'
-# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URI') # 'sqlite:///app.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 
+# app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URI') # 'sqlite:///app.db'
 app.config["JWT_SECRET_KEY"] = "fsbdgfnhgvjnvhmvh" + str(random.randint(1, 1000000000000))
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=1)
 app.config["SECRET_KEY"] = "JKSRVHJVFBSRDFV" + str(random.randint(1, 1000000000000))
@@ -228,7 +226,7 @@ class PublicRegister(Resource):
 
 class VerifyOTP(Resource):
     def post(self):
-        entered_otp = request.form.get('otp')
+        entered_otp = request.json.get('otp')
         print(f"Received OTP for verification: {entered_otp}")
 
         if not entered_otp:
@@ -261,6 +259,7 @@ class VerifyOTP(Resource):
         except Exception as e:
             current_app.logger.error(f"Error occurred during OTP verification: {e}")
             return {'message': 'Internal server error'}, 500
+
 
     
 class AdminRegister(Resource):
@@ -420,10 +419,55 @@ class EventsResource(Resource):
             print(f"Error occurred during event deletion: {e}")
             return {'message': 'Internal server error'}, 500
 
-class OrganizerDashboard(Resource):
+# class OrganizerDashboard(Resource):
+#     @jwt_required()
+#     def post(self):
+#         # Get organizer_id from query parameter or from JWT token
+#         organizer_id_param = request.args.get('organizer_id')
+#         user_id = get_jwt_identity()['user_id'] if not organizer_id_param else organizer_id_param
+#         user = User.query.get(user_id)
+
+#         if not user:
+#             return {'message': 'User not found'}, 404
+
+#         if user.role != 'event_organizer':
+#             return {'message': 'Access denied'}, 403
+
+#         # Parse and validate form data
+#         try:
+#             title = request.form['title']
+#             description = request.form['description']
+#             location = request.form['location']
+#             start_time = datetime.strptime(request.form['start_time'], '%Y-%m-%dT%H:%M:%S')
+#             end_time = datetime.strptime(request.form['end_time'], '%Y-%m-%dT%H:%M:%S')
+#             total_tickets = int(request.form['total_tickets'])
+#             remaining_tickets = int(request.form['remaining_tickets'])
+#             image_url = request.form['image_url']
+#         except (KeyError, ValueError, TypeError):
+#             return {'message': 'Invalid input data'}, 400
+
+#         new_event = Event(
+#             title=title,
+#             description=description,
+#             location=location,
+#             start_time=start_time,
+#             end_time=end_time,
+#             total_tickets=total_tickets,
+#             remaining_tickets=remaining_tickets,
+#             image_url=image_url,
+#             organizer_id=user.id
+#         )
+
+#         db.session.add(new_event)
+#         db.session.commit()
+
+#         return {'id': new_event.id, 'message': 'Event created successfully'}, 201
+
+class OrganizerEvents(Resource):
     @jwt_required()
-    def post(self):
-        user_id = get_jwt_identity()['user_id']
+    def get(self):
+        user_id_param = request.args.get('user_id')
+        user_id = get_jwt_identity()['user_id'] if not user_id_param else user_id_param
         user = User.query.get(user_id)
 
         if not user:
@@ -432,36 +476,22 @@ class OrganizerDashboard(Resource):
         if user.role != 'event_organizer':
             return {'message': 'Access denied'}, 403
 
-        # Parse and validate form data
-        try:
-            title = request.form['title']
-            description = request.form['description']
-            location = request.form['location']
-            start_time = datetime.strptime(request.form['start_time'], '%Y-%m-%dT%H:%M:%S')
-            end_time = datetime.strptime(request.form['end_time'], '%Y-%m-%dT%H:%M:%S')
-            total_tickets = int(request.form['total_tickets'])
-            remaining_tickets = int(request.form['remaining_tickets'])
-            image_url = request.form['image_url']
-        except (KeyError, ValueError, TypeError):
-            return {'message': 'Invalid input data'}, 400
+        events = Event.query.filter_by(organizer_id=user.id).all()
+        events_list = [
+            {
+                'id': event.id,
+                'title': event.title,
+                'description': event.description,
+                'location': event.location,
+                'start_time': event.start_time.isoformat(),
+                'end_time': event.end_time.isoformat(),
+                'total_tickets': event.total_tickets,
+                'remaining_tickets': event.remaining_tickets,
+                'image_url': event.image_url
+            } for event in events
+        ]
 
-        new_event = Event(
-            title=title,
-            description=description,
-            location=location,
-            start_time=start_time,
-            end_time=end_time,
-            total_tickets=total_tickets,
-            remaining_tickets=remaining_tickets,
-            image_url=image_url,
-            organizer_id=user.id
-        )
-
-        db.session.add(new_event)
-        db.session.commit()
-
-        return {'id': new_event.id, 'message': 'Event created successfully'}, 201
-
+        return {'events': events_list}, 200
 
 
 revoked_tokens = set() 
@@ -569,9 +599,15 @@ class CategoryResource(Resource):
         return '', 204
 class TicketResource(Resource):
     def get(self, ticket_id=None):
+        # Retrieve the user_id from the query parameters
+        user_id = request.args.get('user_id')
+        
         if ticket_id:
+            # Retrieve a specific ticket by ID
             ticket = Ticket.query.get(ticket_id)
             if ticket:
+                # Fetch the event details if the ticket exists
+                event = Event.query.get(ticket.event_id)
                 return {
                     'id': ticket.id,
                     'event_id': ticket.event_id,
@@ -579,12 +615,20 @@ class TicketResource(Resource):
                     'ticket_type': ticket.ticket_type,
                     'price': float(ticket.price),
                     'quantity': ticket.quantity,
-                    'status': ticket.status
+                    'status': ticket.status,
+                    'event': {
+                        'title': event.title if event else 'Unknown Event'
+                    }
                 }, 200
             return {'error': 'Ticket not found'}, 404
         
-        # List all tickets
-        tickets = Ticket.query.all()
+        # List all tickets or filter by user_id
+        if user_id:
+            tickets = Ticket.query.filter_by(user_id=user_id).all()
+        else:
+            tickets = Ticket.query.all()
+
+        # Fetch event details for each ticket
         return [
             {
                 'id': ticket.id,
@@ -593,73 +637,13 @@ class TicketResource(Resource):
                 'ticket_type': ticket.ticket_type,
                 'price': float(ticket.price),
                 'quantity': ticket.quantity,
-                'status': ticket.status
+                'status': ticket.status,
+                'event': {
+                    'title': Event.query.get(ticket.event_id).title if Event.query.get(ticket.event_id) else 'Unknown Event'
+                }
             }
             for ticket in tickets
         ], 200
-
-    @jwt_required()
-    def post(self):
-        user_id = get_jwt_identity()['user_id']
-        if not user_id:
-            return {'message': 'User not found'}, 404
-
-        event_id = request.form.get('event_id')
-        ticket_type = request.form.get('ticket_type')
-        price = request.form.get('price')
-        quantity = request.form.get('quantity')
-        status = request.form.get('status')
-
-        if not event_id or not ticket_type or not price or not quantity or not status:
-            return {'message': 'All fields are required'}, 400
-
-        new_ticket = Ticket(
-            event_id=event_id,
-            user_id=user_id,
-            ticket_type=ticket_type,
-            price=price,
-            quantity=quantity,
-            status=status
-        )
-
-        db.session.add(new_ticket)
-        db.session.commit()
-
-        return {'id': new_ticket.id, 'message': 'Ticket created successfully'}, 201
-
-    @jwt_required()
-    def put(self, ticket_id):
-        ticket = Ticket.query.get(ticket_id)
-        if not ticket:
-            return {'message': 'Ticket not found'}, 404
-
-        user_id = get_jwt_identity()['user_id']
-        if ticket.user_id != user_id:
-            return {'message': 'Access denied'}, 403
-
-        ticket.ticket_type = request.form.get('ticket_type', ticket.ticket_type)
-        ticket.price = request.form.get('price', ticket.price)
-        ticket.quantity = request.form.get('quantity', ticket.quantity)
-        ticket.status = request.form.get('status', ticket.status)
-
-        db.session.commit()
-
-        return {'message': 'Ticket updated successfully'}, 200
-
-    @jwt_required()
-    def delete(self, ticket_id):
-        ticket = Ticket.query.get(ticket_id)
-        if not ticket:
-            return {'message': 'Ticket not found'}, 404
-
-        user_id = get_jwt_identity()['user_id']
-        if ticket.user_id != user_id:
-            return {'message': 'Access denied'}, 403
-
-        db.session.delete(ticket)
-        db.session.commit()
-
-        return {'message': 'Ticket deleted successfully'}, 200
     
 class UserRole(Resource):
     def get(self):
@@ -771,30 +755,35 @@ class Transaction(Resource):
     
 
 class Mpesa(Resource):
-    def __init__(self):
-        self.intasend = IntaSend()
-
     def post(self):
         data = request.json
         phone_number = data.get('phone_number')
         amount = data.get('amount')
-
+        email = data.get('email')
+        print('PHONE NUMBER', phone_number, 'AMOUNT', amount, 'EMAIL', email)
         if not phone_number or not amount:
             return jsonify({'error': 'Phone number and amount are required.'}), 400
 
         try:
-            response = self.intasend.initiate_payment(amount, phone_number, 'http://127.0.0.1:5555/callback-url')
+            service = APIService(token='ISSecretKey_test_997023a2-63e1-4864-aa10-3268377569be',publishable_key='ISPubKey_test_93dd9667-9e6e-4e4a-99b4-dc9795a392a9', test=True)
+            response = service.collect.mpesa_stk_push(phone_number=phone_number,
+                                        email=email, amount=amount, narrative="Ticket Payment")
+            invoice_id = response.get('invoice', {}).get('invoice_id')
+            # Print the invoice_id
+            print(f"Invoice ID: {invoice_id}")
 
-            # Save payment details
-            payment = Payment(
-                amount=amount,
-                payment_method='MPESA',
-                payment_status='Pending',
-                mpesa_transaction_id=response.get('transaction_id'),
-                phone_number=phone_number
-            )
-            db.session.add(payment)
-            db.session.commit()
+
+# saving to database
+
+            # payment = Payment(
+            #     amount=amount,
+            #     payment_method='MPESA',
+            #     payment_status='Pending',
+            #     mpesa_transaction_id=response.get('transaction_id'),
+            #     phone_number=phone_number
+            # )
+            # db.session.add(payment)
+            # db.session.commit()
 
             return jsonify(response)
         except Exception as e:
@@ -806,6 +795,7 @@ class Mpesa(Resource):
             return jsonify(response)
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+    
 
 # Define the routes
 @app.route('/initiate-transaction', methods=['POST'])
@@ -836,7 +826,7 @@ def verify_payment(payment_id):
 @app.route('/download-receipt/<int:payment_id>', methods=['GET'])
 def download_receipt(payment_id):
     try:
-        # Look up the payment in your database using the payment_id
+       
         payment = Payment.query.get(payment_id)
 
         if not payment:
@@ -869,6 +859,7 @@ def download_receipt(payment_id):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
 class BookedEventResource(Resource):
     def get(self, event_id=None):
         if event_id:
@@ -938,8 +929,8 @@ api.add_resource(Login, '/login')
 api.add_resource(CheckSession, '/session')
 api.add_resource(Logout, '/logout')
 api.add_resource(PublicRegister, '/register')
-api.add_resource(AdminRegister, '/register/admin')
-api.add_resource( OrganizerDashboard, '/organizer-dashboard')
+api.add_resource(AdminRegister, '/register/admin') 
+api.add_resource(OrganizerEvents, '/organizer-events')  
 api.add_resource(TicketResource, '/tickets', '/tickets/<int:ticket_id>')
 api.add_resource(UserRole, '/user-role')
 api.add_resource(BookTicket, '/book-ticket')
