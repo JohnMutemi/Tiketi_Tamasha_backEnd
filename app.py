@@ -9,10 +9,10 @@ from datetime import timedelta, datetime
 from jwt.exceptions import InvalidTokenError
 from utils import generate_otp, send_otp_to_email
 from datetime import datetime, timedelta
-import random, os
+import random, os, requests
 from flask_otp import OTP
 from sqlalchemy.orm import joinedload
-from intasend import IntaSend
+from intasend import APIService
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
@@ -23,11 +23,9 @@ otp.init_app(current_app)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]}})
 
-app.config['INTASEND_PUBLIC_KEY'] = 'ISPubKey_live_bdabab19-cd29-4975-96dd-87f04c49edb9'
-app.config['INTASEND_PRIVATE_KEY'] = 'ISSecretKey_live_128af563-9a65-4984-bccb-29a32b2589a5'
-# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URI') # 'sqlite:///app.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 
+# app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URI') # 'sqlite:///app.db'
 app.config["JWT_SECRET_KEY"] = "fsbdgfnhgvjnvhmvh" + str(random.randint(1, 1000000000000))
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=1)
 app.config["SECRET_KEY"] = "JKSRVHJVFBSRDFV" + str(random.randint(1, 1000000000000))
@@ -228,7 +226,7 @@ class PublicRegister(Resource):
 
 class VerifyOTP(Resource):
     def post(self):
-        entered_otp = request.form.get('otp')
+        entered_otp = request.json.get('otp')
         print(f"Received OTP for verification: {entered_otp}")
 
         if not entered_otp:
@@ -261,6 +259,7 @@ class VerifyOTP(Resource):
         except Exception as e:
             current_app.logger.error(f"Error occurred during OTP verification: {e}")
             return {'message': 'Internal server error'}, 500
+
 
     
 class AdminRegister(Resource):
@@ -771,30 +770,35 @@ class Transaction(Resource):
     
 
 class Mpesa(Resource):
-    def __init__(self):
-        self.intasend = IntaSend()
-
     def post(self):
         data = request.json
         phone_number = data.get('phone_number')
         amount = data.get('amount')
-
+        email = data.get('email')
+        print('PHONE NUMBER', phone_number, 'AMOUNT', amount, 'EMAIL', email)
         if not phone_number or not amount:
             return jsonify({'error': 'Phone number and amount are required.'}), 400
 
         try:
-            response = self.intasend.initiate_payment(amount, phone_number, 'http://127.0.0.1:5555/callback-url')
+            service = APIService(token='ISSecretKey_test_997023a2-63e1-4864-aa10-3268377569be',publishable_key='ISPubKey_test_93dd9667-9e6e-4e4a-99b4-dc9795a392a9', test=True)
+            response = service.collect.mpesa_stk_push(phone_number=phone_number,
+                                        email=email, amount=amount, narrative="Ticket Payment")
+            invoice_id = response.get('invoice', {}).get('invoice_id')
+            # Print the invoice_id
+            print(f"Invoice ID: {invoice_id}")
 
-            # Save payment details
-            payment = Payment(
-                amount=amount,
-                payment_method='MPESA',
-                payment_status='Pending',
-                mpesa_transaction_id=response.get('transaction_id'),
-                phone_number=phone_number
-            )
-            db.session.add(payment)
-            db.session.commit()
+
+# saving to database
+
+            # payment = Payment(
+            #     amount=amount,
+            #     payment_method='MPESA',
+            #     payment_status='Pending',
+            #     mpesa_transaction_id=response.get('transaction_id'),
+            #     phone_number=phone_number
+            # )
+            # db.session.add(payment)
+            # db.session.commit()
 
             return jsonify(response)
         except Exception as e:
@@ -806,6 +810,7 @@ class Mpesa(Resource):
             return jsonify(response)
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+    
 
 # Define the routes
 @app.route('/initiate-transaction', methods=['POST'])
@@ -836,7 +841,7 @@ def verify_payment(payment_id):
 @app.route('/download-receipt/<int:payment_id>', methods=['GET'])
 def download_receipt(payment_id):
     try:
-        # Look up the payment in your database using the payment_id
+       
         payment = Payment.query.get(payment_id)
 
         if not payment:
@@ -869,6 +874,7 @@ def download_receipt(payment_id):
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+    
 class BookedEventResource(Resource):
     def get(self, event_id=None):
         if event_id:
