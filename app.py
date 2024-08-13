@@ -4,6 +4,7 @@ from flask_cors import CORS
 from flask_restful import Api, Resource
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity, get_jwt
 from flask_jwt_extended.exceptions import RevokedTokenError
+from werkzeug.security import generate_password_hash
 from werkzeug.exceptions import NotFound
 from datetime import timedelta, datetime
 from jwt.exceptions import InvalidTokenError
@@ -23,9 +24,10 @@ otp.init_app(current_app)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]}})
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 
-# app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URI') # 'sqlite:///app.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URI') # 'sqlite:///app.db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config["JWT_SECRET_KEY"] = "fsbdgfnhgvjnvhmvh" + str(random.randint(1, 1000000000000))
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=1)
 app.config["SECRET_KEY"] = "JKSRVHJVFBSRDFV" + str(random.randint(1, 1000000000000))
@@ -202,37 +204,47 @@ class PublicRegister(Resource):
 
         print(f"Received registration data: username={username}, email={email}, role={role}")
 
+        # Validate required fields
         if not username or not password or not email or not role:
             return {'message': 'Username, password, role, and email are required'}, 400
         
         if role not in ['event_organizer', 'customer']:
             return {'message': 'Invalid role. Choose either "event_organizer" or "customer"'}, 400
 
+        # Check if the user already exists
         existing_user = User.query.filter_by(username=username).first()
         if existing_user:
             return {'message': 'User already exists'}, 400
+
+        # Hash the password for security
+        hashed_password = generate_password_hash(password)
 
         # Generate and send OTP
         otp_code = generate_otp()
         print(f"Generated OTP: {otp_code}")
         send_otp_to_email(email, otp_code)
 
-        # Temporarily store the OTP and user details in session
+        
         session['otp'] = otp_code
-        session['user_details'] = {'username': username, 'password': password, 'role': role, 'email': email}
+        session['user_details'] = {
+            'username': username,
+            'password': hashed_password,  
+            'role': role,
+            'email': email
+        }
         print(f"Stored OTP and user details in session: {session['user_details']}")
 
         return {'message': 'OTP sent to email. Please verify.'}, 200
-
 class VerifyOTP(Resource):
     def post(self):
         entered_otp = request.json.get('otp')
         print(f"Received OTP for verification: {entered_otp}")
 
+        # Validate the OTP input
         if not entered_otp:
             return {'message': 'OTP is required'}, 400
 
-        # Retrieve stored OTP and user details
+        # Retrieve the stored OTP and user details from the session
         stored_otp = session.get('otp')
         user_details = session.get('user_details')
         print(f"Stored OTP: {stored_otp}")
@@ -242,16 +254,17 @@ class VerifyOTP(Resource):
             return {'message': 'Invalid OTP'}, 400
 
         try:
-            # Complete user registration
-            new_user = User(username=user_details['username'], 
-                            email=user_details['email'], 
-                            role=user_details['role'])
-            new_user.set_password(user_details['password'])
+            new_user = User(
+                username=user_details['username'], 
+                email=user_details['email'], 
+                role=user_details['role']
+            )
+            new_user.set_password(user_details['password']) 
             db.session.add(new_user)
             db.session.commit()
             print(f"User registered successfully: {new_user.username}")
 
-            # Clean up session
+            # Clean up session data after successful registration
             session.pop('otp', None)
             session.pop('user_details', None)
 
@@ -260,8 +273,6 @@ class VerifyOTP(Resource):
             current_app.logger.error(f"Error occurred during OTP verification: {e}")
             return {'message': 'Internal server error'}, 500
 
-
-    
 class AdminRegister(Resource):
     @jwt_required()
     def post(self):
@@ -419,49 +430,6 @@ class EventsResource(Resource):
             print(f"Error occurred during event deletion: {e}")
             return {'message': 'Internal server error'}, 500
 
-# class OrganizerDashboard(Resource):
-#     @jwt_required()
-#     def post(self):
-#         # Get organizer_id from query parameter or from JWT token
-#         organizer_id_param = request.args.get('organizer_id')
-#         user_id = get_jwt_identity()['user_id'] if not organizer_id_param else organizer_id_param
-#         user = User.query.get(user_id)
-
-#         if not user:
-#             return {'message': 'User not found'}, 404
-
-#         if user.role != 'event_organizer':
-#             return {'message': 'Access denied'}, 403
-
-#         # Parse and validate form data
-#         try:
-#             title = request.form['title']
-#             description = request.form['description']
-#             location = request.form['location']
-#             start_time = datetime.strptime(request.form['start_time'], '%Y-%m-%dT%H:%M:%S')
-#             end_time = datetime.strptime(request.form['end_time'], '%Y-%m-%dT%H:%M:%S')
-#             total_tickets = int(request.form['total_tickets'])
-#             remaining_tickets = int(request.form['remaining_tickets'])
-#             image_url = request.form['image_url']
-#         except (KeyError, ValueError, TypeError):
-#             return {'message': 'Invalid input data'}, 400
-
-#         new_event = Event(
-#             title=title,
-#             description=description,
-#             location=location,
-#             start_time=start_time,
-#             end_time=end_time,
-#             total_tickets=total_tickets,
-#             remaining_tickets=remaining_tickets,
-#             image_url=image_url,
-#             organizer_id=user.id
-#         )
-
-#         db.session.add(new_event)
-#         db.session.commit()
-
-#         return {'id': new_event.id, 'message': 'Event created successfully'}, 201
 
 class OrganizerEvents(Resource):
     @jwt_required()
