@@ -212,4 +212,4 @@ class Ticket(db.Model, SerializerMixin):
     user = db.relationship('User', back_populates='tickets')
     payments = db.relationship('Payment', back_populates='ticket', cascade='all, delete-orphan')
 
-    serialize_rules = ('-event_tickets.event', '-user.tickets', '-payments.ticket')
+    serialize_rules = ('-event.tickets', '-user.tickets', '-payments.ticket')

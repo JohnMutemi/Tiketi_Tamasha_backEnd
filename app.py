@@ -10,6 +10,7 @@ from datetime import timedelta, datetime
 from jwt.exceptions import InvalidTokenError
 from utils import generate_otp, send_otp_to_email
 from datetime import datetime, timedelta
+from sqlalchemy.exc import SQLAlchemyError
 import random, os, requests
 from flask_otp import OTP
 from sqlalchemy.orm import joinedload
@@ -24,9 +25,9 @@ otp.init_app(current_app)
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]}})
 
-# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
 
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URI') # 'sqlite:///app.db'
+# app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URI') # 'sqlite:///app.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config["JWT_SECRET_KEY"] = "fsbdgfnhgvjnvhmvh" + str(random.randint(1, 1000000000000))
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=1)
@@ -73,99 +74,105 @@ def index():
     return '<h3> Tiketi Tamasha Backend Repository</h3>'
 
 class UserResource(Resource):
+
+    @jwt_required()
     def post(self):
-        # Create a new user account with form data
-        data = request.form
+        user_identity = get_jwt_identity()
+        current_user = User.query.get(user_identity['user_id'])
 
-        if 'email' not in data or 'password' not in data:
-            return {'error': 'Email and password required'}, 400
+        if not current_user or current_user.role != 'admin':
+            return {'message': 'Access denied. Admins only.'}, 403
 
-        user = User(
-            email=data['email'],
-            password=data['password'] 
-        )
-        db.session.add(user)
-        db.session.commit()
+        data = request.get_json()
+
+        if not data or 'email' not in data or 'password' not in data:
+            return {'error': 'Email and password are required.'}, 400
+
+        hashed_password = generate_password_hash(data['password'], method='pbkdf2:sha256')
+
+        try:
+            user = User(
+                email=data['email'],
+                _password_hash=hashed_password,
+                username=data.get('username', ''),
+                role=data.get('role', 'user')
+            )
+            db.session.add(user)
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return {'error': str(e)}, 500
         
         return {'message': 'User created successfully', 'user_id': user.id}, 201
 
     @jwt_required()
     def get(self, user_id=None):
-        # Get user details, or list all users if no user_id is provided
         user_identity = get_jwt_identity()
         current_user = User.query.get(user_identity['user_id'])
 
-        if not current_user:
-            return {'error': 'User not found'}, 404
-
-        if current_user.role != 'admin' and user_id:
-            if user_id != current_user.id:
-                return {'message': 'Access denied'}, 403
+        if not current_user or current_user.role != 'admin':
+            return {'message': 'Access denied. Admins only.'}, 403
 
         if user_id:
             user = User.query.get(user_id)
-            if user:
-                return user.to_dict(), 200
-            return {'error': 'User not found'}, 404
-        
+            if not user:
+                return {'message': 'User not found.'}, 404
+            return user.to_dict(), 200
+
         users = User.query.all()
-        return [user.to_dict() for user in users], 200
+        return {'users': [user.to_dict() for user in users]}, 200
 
     @jwt_required()
-    def patch(self, user_id):
-        print(f"Received PATCH request for user ID: {user_id}")
+    def put(self, user_id):
         user_identity = get_jwt_identity()
         current_user = User.query.get(user_identity['user_id'])
 
-        if not current_user:
-            print("Current user not found.")
-            return {'error': 'User not found'}, 404
-
-        if not current_user.is_admin():
-            print("Access denied for non-admin user.")
-            return {'message': 'Access denied'}, 403
-
-        user = User.query.get(user_id)
-        if not user:
-            print(f"User with ID {user_id} not found.")
-            return {'error': 'User not found'}, 404
+        if not current_user or current_user.role != 'admin':
+            return {'message': 'Access denied. Admins only.'}, 403
 
         data = request.get_json()
-        print(f"Data received for update: {data}")
+        user = User.query.get(user_id)
+
+        if not user:
+            return {'message': 'User not found.'}, 404
+
+        if 'email' in data:
+            user.email = data['email']
+        if 'password' in data:
+            user._password_hash = generate_password_hash(data['password'], method='pbkdf2:sha256')
+        if 'username' in data:
+            user.username = data['username']
+        if 'role' in data:
+            user.role = data['role']
 
         try:
-            for key, value in data.items():
-                if hasattr(user, key):
-                    setattr(user, key, value)
             db.session.commit()
-            print(f"User with ID {user_id} updated successfully.")
-            return user.to_dict(), 200
         except Exception as e:
-            print(f"Error updating user: {e}")
             db.session.rollback()
-            return {'error': 'Error updating user'}, 500
+            return {'error': str(e)}, 500
+
+        return {'message': 'User updated successfully'}, 200
 
     @jwt_required()
     def delete(self, user_id):
-        """Delete a user account"""
         user_identity = get_jwt_identity()
         current_user = User.query.get(user_identity['user_id'])
 
-        if not current_user:
-            return {'error': 'User not found'}, 404
-
-        if current_user.role != 'admin':
-            return {'message': 'Access denied'}, 403
+        if not current_user or current_user.role != 'admin':
+            return {'message': 'Access denied. Admins only.'}, 403
 
         user = User.query.get(user_id)
-
         if not user:
-            return {'error': 'User not found'}, 404
+            return {'message': 'User not found.'}, 404
 
-        db.session.delete(user)
-        db.session.commit()
+        try:
+            db.session.delete(user)
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            return {'error': str(e)}, 500
+
         return {'message': 'User deleted successfully'}, 200
-     
 class Login(Resource):
 
     def post(self):
@@ -198,14 +205,14 @@ class Login(Resource):
 class PublicRegister(Resource):
     def post(self):
         username = request.form.get('username')
-        password = request.form.get('password')
+        _password_hash = request.form.get('password')
         email = request.form.get('email')
         role = request.form.get('role')
 
         print(f"Received registration data: username={username}, email={email}, role={role}")
 
         # Validate required fields
-        if not username or not password or not email or not role:
+        if not username or not _password_hash or not email or not role:
             return {'message': 'Username, password, role, and email are required'}, 400
         
         if role not in ['event_organizer', 'customer']:
@@ -217,24 +224,31 @@ class PublicRegister(Resource):
             return {'message': 'User already exists'}, 400
 
         # Hash the password for security
-        hashed_password = generate_password_hash(password)
+        hashed_password = generate_password_hash(_password_hash)
 
         # Generate and send OTP
         otp_code = generate_otp()
+        otp_expiration = datetime.utcnow() + timedelta(minutes=10)  # OTP expires in 10 minutes
         print(f"Generated OTP: {otp_code}")
         send_otp_to_email(email, otp_code)
 
-        
-        session['otp'] = otp_code
-        session['user_details'] = {
-            'username': username,
-            'password': hashed_password,  
-            'role': role,
-            'email': email
-        }
-        print(f"Stored OTP and user details in session: {session['user_details']}")
+        # Create a new user instance with OTP and save it
+        new_user = User(
+            username=username,
+            email=email,
+            _password_hash=hashed_password,
+            role=role,
+            otp=otp_code,
+            otp_expiration=otp_expiration
+        )
+
+        db.session.add(new_user)
+        db.session.commit()
+
+        print(f"Stored user with OTP in database: {new_user}")
 
         return {'message': 'OTP sent to email. Please verify.'}, 200
+
 class VerifyOTP(Resource):
     def post(self):
         entered_otp = request.json.get('otp')
@@ -244,34 +258,28 @@ class VerifyOTP(Resource):
         if not entered_otp:
             return {'message': 'OTP is required'}, 400
 
-        # Retrieve the stored OTP and user details from the session
-        stored_otp = session.get('otp')
-        user_details = session.get('user_details')
-        print(f"Stored OTP: {stored_otp}")
-        print(f"Stored user details: {user_details}")
-
-        if not stored_otp or stored_otp != entered_otp:
+        # Retrieve the user record from the database using the OTP
+        user = User.query.filter_by(otp=entered_otp).first()
+        if not user:
             return {'message': 'Invalid OTP'}, 400
 
-        try:
-            new_user = User(
-                username=user_details['username'], 
-                email=user_details['email'], 
-                role=user_details['role']
-            )
-            new_user.set_password(user_details['password']) 
-            db.session.add(new_user)
-            db.session.commit()
-            print(f"User registered successfully: {new_user.username}")
+        # Check if the OTP is expired
+        if datetime.utcnow() > user.otp_expiration:
+            return {'message': 'OTP has expired'}, 400
 
-            # Clean up session data after successful registration
-            session.pop('otp', None)
-            session.pop('user_details', None)
+        try:
+            # Complete user registration by clearing the OTP fields
+            user.otp = None
+            user.otp_expiration = None
+            db.session.commit()
+
+            print(f"User registered successfully: {user.username}")
 
             return {'message': 'User registered and logged in successfully'}, 201
         except Exception as e:
             current_app.logger.error(f"Error occurred during OTP verification: {e}")
             return {'message': 'Internal server error'}, 500
+
 
 class AdminRegister(Resource):
     @jwt_required()
@@ -334,7 +342,8 @@ class EventsResource(Resource):
                 'end_time': event.end_time.isoformat(),
                 'total_tickets': event.total_tickets,
                 'remaining_tickets': event.remaining_tickets,
-                'image_url': event.image_url
+                'image_url': event.image_url,
+                'organizer_id':event.organizer_id
             })
 
         print(f"Event list: {event_list}")
@@ -429,37 +438,166 @@ class EventsResource(Resource):
         except Exception as e:
             print(f"Error occurred during event deletion: {e}")
             return {'message': 'Internal server error'}, 500
+class EventAttendeesResource(Resource):
+    @jwt_required()
+    def get(self, event_id):
+        try:
+            print(f"Fetching attendees for event ID {event_id}")
+
+            # Fetch the event first to ensure it exists
+            event = Event.query.get(event_id)
+            if not event:
+                return {'message': 'Event not found'}, 404
+
+            # Fetch the tickets related to the event
+            tickets = Ticket.query.filter_by(event_id=event_id).all()
+
+            # Extract attendee information
+            attendees = [
+                {
+                    'id': ticket.user.id,
+                    'name': ticket.user.username,
+                    'email': ticket.user.email,
+                    'ticket_type': ticket.ticket_type,
+                    'quantity': ticket.quantity
+                }
+                for ticket in tickets if ticket.user is not None
+            ]
+
+         
+
+            # Return the list of event attendees
+            return jsonify(attendees)
+
+        except Exception as e:
+            print(f"Error fetching attendees: {e}")
+            return {'message': 'An error occurred while fetching attendees.'}, 500
+
+        
+
+   
 
 
 class OrganizerEvents(Resource):
+
     @jwt_required()
     def get(self):
-        user_id_param = request.args.get('user_id')
-        user_id = get_jwt_identity()['user_id'] if not user_id_param else user_id_param
-        user = User.query.get(user_id)
+        print("Received GET request for organizer events")
+        current_user = get_jwt_identity()
+        print(f"Current user: {current_user}")
 
-        if not user:
-            return {'message': 'User not found'}, 404
+        if current_user['role'] not in ['admin', 'event_organizer']:
+            return {'message': 'Unauthorized. Only admins or event organizers can view events.'}, 403
 
-        if user.role != 'event_organizer':
+        try:
+            events = Event.query.filter_by(organizer_id=current_user['user_id']).all()
+            events_list = [event.to_dict() for event in events]
+            print(f"Events retrieved successfully: {events_list}")
+            return {'events': events_list}, 200
+        except SQLAlchemyError as e:
+            print(f"Error occurred while retrieving events: {e}")
+            return {'message': 'Internal server error'}, 500
+
+    @jwt_required()
+    def post(self):
+        print("Received POST request to create an event")
+        current_user = get_jwt_identity()
+        print(f"Current user: {current_user}")
+
+        data = request.get_json()
+        if not data:
+            return {'message': 'No data provided'}, 400
+
+        required_fields = ['title', 'description', 'location', 'start_time', 'end_time', 'total_tickets', 'remaining_tickets', 'image_url']
+        if not all(field in data for field in required_fields):
+            return {'message': 'Missing fields in request'}, 400
+
+        if current_user['role'] != 'event_organizer':
+            return {'message': 'Unauthorized. Only event organizers can create events.'}, 403
+
+        try:
+            event = Event(
+                title=data['title'],
+                description=data['description'],
+                location=data['location'],
+                start_time=datetime.fromisoformat(data['start_time']),
+                end_time=datetime.fromisoformat(data['end_time']),
+                total_tickets=int(data['total_tickets']),
+                remaining_tickets=int(data['remaining_tickets']),
+                image_url=data['image_url'],
+                organizer_id=current_user['user_id']
+            )
+            db.session.add(event)
+            db.session.commit()
+            print(f"Event created successfully: {event}")
+            return {'message': 'Event created successfully', 'event': event.to_dict()}, 201
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            print(f"Error occurred during event creation: {e}")
+            return {'message': 'Internal server error'}, 500
+        except Exception as e:
+            print(f"Unexpected error occurred: {e}")
+            return {'message': 'Unexpected error'}, 500
+
+    @jwt_required()
+    def patch(self, event_id):
+        print(f"Received PATCH request for event ID {event_id}")
+        current_user = get_jwt_identity()
+        if current_user['role'] != 'event_organizer':
             return {'message': 'Access denied'}, 403
 
-        events = Event.query.filter_by(organizer_id=user.id).all()
-        events_list = [
-            {
-                'id': event.id,
-                'title': event.title,
-                'description': event.description,
-                'location': event.location,
-                'start_time': event.start_time.isoformat(),
-                'end_time': event.end_time.isoformat(),
-                'total_tickets': event.total_tickets,
-                'remaining_tickets': event.remaining_tickets,
-                'image_url': event.image_url
-            } for event in events
-        ]
+        event = Event.query.get(event_id)
+        if not event or event.organizer_id != current_user['user_id']:
+            return {'message': 'Event not found or access denied'}, 404
 
-        return {'events': events_list}, 200
+        data = request.get_json()
+        if not data:
+            return {'message': 'No data provided'}, 400
+
+        try:
+            event.title = data.get('title', event.title)
+            event.description = data.get('description', event.description)
+            event.location = data.get('location', event.location)
+            event.start_time = datetime.fromisoformat(data.get('start_time', event.start_time.isoformat()))
+            event.end_time = datetime.fromisoformat(data.get('end_time', event.end_time.isoformat()))
+            event.total_tickets = int(data.get('total_tickets', event.total_tickets))
+            event.remaining_tickets = int(data.get('remaining_tickets', event.remaining_tickets))
+            event.image_url = data.get('image_url', event.image_url)
+
+            db.session.commit()
+            print(f"Event updated successfully: {event}")
+            return {'message': 'Event updated successfully'}, 200
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            print(f"Error occurred during event update: {e}")
+            return {'message': 'Internal server error'}, 500
+        except Exception as e:
+            print(f"Unexpected error occurred: {e}")
+            return {'message': 'Unexpected error'}, 500
+
+    @jwt_required()
+    def delete(self, event_id):
+        print(f"Received DELETE request for event ID {event_id}")
+        current_user = get_jwt_identity()
+        if current_user['role'] != 'event_organizer':
+            return {'message': 'Access denied'}, 403
+
+        event = Event.query.get(event_id)
+        if not event or event.organizer_id != current_user['user_id']:
+            return {'message': 'Event not found or access denied'}, 404
+
+        try:
+            db.session.delete(event)
+            db.session.commit()
+            print(f"Event deleted successfully: {event_id}")
+            return {'message': 'Event deleted successfully'}, 200
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            print(f"Error occurred during event deletion: {e}")
+            return {'message': 'Internal server error'}, 500
+        except Exception as e:
+            print(f"Unexpected error occurred: {e}")
+            return {'message': 'Unexpected error'}, 500
 
 
 revoked_tokens = set() 
@@ -520,16 +658,26 @@ class CheckSession(Resource):
         error_response = {"error": "User not found"}
         print("Error Response:", error_response) 
         return jsonify(error_response), 404
+class CategoryResource(Resource):
+    def get(self, category_id=None):
+        if category_id:
+            # Fetch a single category by ID
+            category = Category.query.get_or_404(category_id)
+            return category.to_dict(), 200
+        else:
+            # Fetch all categories
+            categories = Category.query.all()
+            return [category.to_dict() for category in categories], 200
 
-class CategoryListResource(Resource):
-    def get(self):
-        # Fetch all categories
-        categories = Category.query.all()
-        return [category.to_dict() for category in categories], 200
-
+    @jwt_required()
     def post(self):
-        # Handle form data for creating a new category
-        data = request.form
+        # Check if the user is an admin
+        current_user = get_jwt_identity()
+        if current_user.get('role') != 'admin':  # Adjust based on how role is stored in JWT
+            return {'message': 'Admin access required'}, 403
+
+        # Handle JSON data for creating a new category
+        data = request.get_json()
         name = data.get('name')
 
         if not name:
@@ -540,16 +688,16 @@ class CategoryListResource(Resource):
         db.session.commit()
         return new_category.to_dict(), 201
 
-class CategoryResource(Resource):
-    def get(self, category_id):
-        # Fetch a single category by ID
-        category = Category.query.get_or_404(category_id)
-        return category.to_dict(), 200
-
+    @jwt_required()
     def put(self, category_id):
-        # Handle form data for updating an existing category
+        # Check if the user is an admin
+        current_user = get_jwt_identity()
+        if current_user.get('role') != 'admin':  # Adjust based on how role is stored in JWT
+            return {'message': 'Admin access required'}, 403
+
+        # Handle JSON data for updating an existing category
         category = Category.query.get_or_404(category_id)
-        data = request.form
+        data = request.get_json()
         name = data.get('name')
 
         if not name:
@@ -559,12 +707,19 @@ class CategoryResource(Resource):
         db.session.commit()
         return category.to_dict(), 200
 
+    @jwt_required()
     def delete(self, category_id):
+        # Check if the user is an admin
+        current_user = get_jwt_identity()
+        if current_user.get('role') != 'admin':  # Adjust based on how role is stored in JWT
+            return {'message': 'Admin access required'}, 403
+
         # Handle deletion of a category
         category = Category.query.get_or_404(category_id)
         db.session.delete(category)
         db.session.commit()
         return '', 204
+    
 class TicketResource(Resource):
     def get(self, ticket_id=None):
         # Retrieve the user_id from the query parameters
@@ -642,23 +797,39 @@ class BookTicket(Resource):
     
 class AdminDashboard(Resource):
     @jwt_required()
-    def get(self):
+    def get(self, user_id=None, event_id=None, category_id=None, transaction_id=None):
         claims = get_jwt_identity()
         if claims['role'] != 'admin':
             return {'message': 'Access denied'}, 403
+
+        if user_id:
+            user = User.query.get_or_404(user_id)
+            return user.to_dict(), 200
         
+        if event_id:
+            event = Event.query.get_or_404(event_id)
+            return event.to_dict(), 200
+        
+        if category_id:
+            category = Category.query.get_or_404(category_id)
+            return category.to_dict(), 200
+        
+        if transaction_id:
+            transaction = Transaction.query.get_or_404(transaction_id)
+            return transaction.to_dict(), 200
+
+        # Overview of users, events, categories, and transactions
         users = User.query.all()
         events = Event.query.all()
+        categories = Category.query.all()
+        transactions = Transaction.query.all()
         
         return {
             'users': [user.to_dict() for user in users],
-            'events': [event.to_dict() for event in events]
+            'events': [event.to_dict() for event in events],
+            'categories': [category.to_dict() for category in categories],
+            'transactions': [transaction.to_dict() for transaction in transactions]
         }, 200
-    
-@jwt.user_identity_loader
-def user_identity_lookup(user):
-    return {'user_id': user['user_id'], 'role': user['role']}
-
 
 class Transaction(Resource):
     def get(self):
@@ -889,20 +1060,29 @@ class BookedEventResource(Resource):
 
 # API end points
 api.add_resource(Mpesa, '/mpesa', '/mpesa/<string:payment_id>')
+api.add_resource(EventAttendeesResource, '/events/<int:event_id>/attendees')
 api.add_resource(Transaction, '/payments')
-api.add_resource(CategoryListResource, '/categories')
-api.add_resource(CategoryResource, '/categories/<int:category_id>')
+api.add_resource(CategoryResource, '/categories', '/categories/<int:category_id>')
 api.add_resource(UserResource, '/users', '/users/<int:user_id>')
 api.add_resource(Login, '/login')
 api.add_resource(CheckSession, '/session')
 api.add_resource(Logout, '/logout')
 api.add_resource(PublicRegister, '/register')
 api.add_resource(AdminRegister, '/register/admin') 
-api.add_resource(OrganizerEvents, '/organizer-events')  
+api.add_resource(OrganizerEvents, '/organizer-events', '/organizer-events/<int:event_id>') 
 api.add_resource(TicketResource, '/tickets', '/tickets/<int:ticket_id>')
 api.add_resource(UserRole, '/user-role')
 api.add_resource(BookTicket, '/book-ticket')
-api.add_resource(AdminDashboard, '/admin-dashboard', '/admin-dashboard/<int:user_id>', '/admin-dashboard/events/<int:event_id>')
+api.add_resource(
+    AdminDashboard,
+    '/admin-dashboard',
+    '/admin-dashboard/users/<int:user_id>',
+    '/admin-dashboard/events/<int:event_id>',
+    '/admin-dashboard/categories',
+    '/admin-dashboard/categories/<int:category_id>',
+    '/admin-dashboard/transactions',
+    '/admin-dashboard/transactions/<int:transaction_id>'
+)
 api.add_resource(EventsResource, '/events','/events/<int:event_id>')
 api.add_resource(VerifyOTP, '/verify-otp')
 api.add_resource(BookedEventResource, '/api/booked-events', '/api/booked-events/<int:event_id>')
