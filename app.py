@@ -7,6 +7,7 @@ from flask_jwt_extended.exceptions import RevokedTokenError
 from werkzeug.security import generate_password_hash
 from werkzeug.exceptions import NotFound
 from datetime import timedelta, datetime
+import jwt
 from jwt.exceptions import InvalidTokenError
 from utils import generate_otp, send_otp_to_email
 from datetime import datetime, timedelta
