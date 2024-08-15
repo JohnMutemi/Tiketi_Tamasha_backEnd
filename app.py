@@ -30,16 +30,7 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]}})
 
 # app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
-environment = os.getenv('ENV', 'development')  
-
-if environment == 'production':
-    DATABASE_URI = os.getenv('EXTERNAL_DATABASE_URI')
-else:
-    DATABASE_URI = os.getenv('INTERNAL_DATABASE_URI')
-
-# Use the selected DATABASE_URI in your Flask app configuration
-app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URI
-
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv(' DATABASE_URI')
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config["JWT_SECRET_KEY"] = "fsbdgfnhgvjnvhmvh" + str(random.randint(1, 1000000000000))
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=1)
