@@ -18,7 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 import random, os, requests
 from flask_otp import OTP
 from sqlalchemy.orm import joinedload
-from intasend import APIService
+# from intasend import APIService
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
