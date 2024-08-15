@@ -7,6 +7,8 @@ from flask_jwt_extended.exceptions import RevokedTokenError
 from werkzeug.security import generate_password_hash
 from werkzeug.exceptions import NotFound
 from datetime import timedelta, datetime
+from threading import Timer
+from dotenv import load_dotenv
 import jwt
 from jwt.exceptions import InvalidTokenError
 from utils import generate_otp, send_otp_to_email
@@ -19,6 +21,7 @@ from intasend import APIService
 from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from ics import Calendar, Event
 
 otp = OTP()
 otp.init_app(current_app)
@@ -27,8 +30,16 @@ app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]}})
 
 # app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+environment = os.getenv('ENV', 'development')  
 
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URI') # 'sqlite:///app.db'
+if environment == 'production':
+    DATABASE_URI = os.getenv('EXTERNAL_DATABASE_URI')
+else:
+    DATABASE_URI = os.getenv('INTERNAL_DATABASE_URI')
+
+# Use the selected DATABASE_URI in your Flask app configuration
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URI
+
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config["JWT_SECRET_KEY"] = "fsbdgfnhgvjnvhmvh" + str(random.randint(1, 1000000000000))
 app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=1)
@@ -741,11 +752,13 @@ class TicketResource(Resource):
                     'quantity': ticket.quantity,
                     'status': ticket.status,
                     'event': {
-                        'title': event.title if event else 'Unknown Event'
+                        'title': event.title if event else 'Unknown Event',
+                        'start_time': ticket.event.start_time.isoformat(),
+                        'end_time': ticket.event.end_time.isoformat()
                     }
                 }, 200
             return {'error': 'Ticket not found'}, 404
-        
+
         # List all tickets or filter by user_id
         if user_id:
             tickets = Ticket.query.filter_by(user_id=user_id).all()
@@ -893,24 +906,70 @@ class Transaction(Resource):
 
         return {'message': f'Refund {action}d successfully'}, 200
     
-
 class Mpesa(Resource):
     def post(self):
         data = request.json
         phone_number = data.get('phone_number')
         amount = data.get('amount')
         email = data.get('email')
-        print('PHONE NUMBER', phone_number, 'AMOUNT', amount, 'EMAIL', email)
+        
         if not phone_number or not amount:
             return jsonify({'error': 'Phone number and amount are required.'}), 400
 
         try:
-            service = APIService(token='ISSecretKey_test_997023a2-63e1-4864-aa10-3268377569be',publishable_key='ISPubKey_test_93dd9667-9e6e-4e4a-99b4-dc9795a392a9', test=True)
-            response = service.collect.mpesa_stk_push(phone_number=phone_number,
-                                        email=email, amount=amount, narrative="Ticket Payment")
+            service = APIService(
+                token='ISSecretKey_test_997023a2-63e1-4864-aa10-3268377569be',
+                publishable_key='ISPubKey_test_93dd9667-9e6e-4e4a-99b4-dc9795a392a9',
+                test=True
+            )
+            
+            # Initiate the payment
+            response = service.collect.mpesa_stk_push(
+                phone_number=phone_number,
+                email=email,
+                amount=amount,
+                narrative="Ticket Payment"
+            )
+
             invoice_id = response.get('invoice', {}).get('invoice_id')
-            # Print the invoice_id
+            if not invoice_id:
+                return jsonify({'error': 'Failed to initiate payment.'}), 500
+
             print(f"Invoice ID: {invoice_id}")
+
+            # Function to check payment status
+            def check_status():
+                try:
+                    status_response = service.collect.status(invoice_id=invoice_id)
+                    print('Status Check Response:', status_response)
+
+                    if status_response and status_response.get('invoice'):
+                        status = status_response['invoice'].get('state')
+                        print('Payment Status:', status)
+
+                        if status != 'PROCESSING':
+                            print(f"Final status: {status}")
+                            return jsonify({'message': 'Transaction complete', 'status': status}), 200
+
+                        # If still processing, check again after 6 seconds
+                        Timer(6.0, check_status).start()
+
+                    else:
+                        print('Invalid response structure:', status_response)
+                        return jsonify({'error': 'Failed to check status.'}), 500
+
+                except Exception as e:
+                    print('Status Check Error:', str(e))
+                    return jsonify({'error': 'Failed to check status.'}), 500
+
+            # Start the status check after 6 seconds
+            Timer(6.0, check_status).start()
+
+            return jsonify({'message': 'STK Push initiated', 'data': response}), 201
+
+        except Exception as e:
+            print('STK Push Error:', str(e))
+            return jsonify({'error': 'Failed to initiate payment.', 'details': str(e)}), 500
 
 
 # saving to database
@@ -938,9 +997,48 @@ class Mpesa(Resource):
     
 
 # Define the routes
-@app.route('/initiate-transaction', methods=['POST'])
 def initiate_transaction():
-    return Mpesa().post()
+    data = request.json
+    phone_number = data.get('phone_number')
+    amount = data.get('amount')
+    email = data.get('email')
+    ticket_id = data.get('ticket_id')
+    user_id = data.get('user_id')
+    
+    if not phone_number or not amount or not ticket_id or not user_id:
+        return jsonify({'error': 'Phone number, amount, ticket_id, and user_id are required.'}), 400
+
+    try:
+        service = APIService(
+            token='ISSecretKey_test_997023a2-63e1-4864-aa10-3268377569be',
+            publishable_key='ISPubKey_test_93dd9667-9e6e-4e4a-99b4-dc9795a392a9',
+            test=True
+        )
+        
+        # Initiate the payment
+        response = service.collect.mpesa_stk_push(
+            phone_number=phone_number,
+            email=email,
+            amount=amount,
+            narrative="Ticket Payment"
+        )
+        
+        invoice_id = response.get('invoice', {}).get('invoice_id')
+        if not invoice_id:
+            return jsonify({'error': 'Failed to initiate payment.'}), 500
+        
+        # Update ticket status to "pending"
+        # (Add your database update logic here)
+        # Example (assuming SQLAlchemy):
+        ticket = Ticket.query.filter_by(id=ticket_id).first()
+        if ticket:
+            ticket.status = 'pending'
+            db.session.commit()
+
+        return jsonify({'message': 'Transaction initiated and ticket status set to pending.', 'data': response}), 201
+
+    except Exception as e:
+        return jsonify({'error': 'Failed to initiate payment.', 'details': str(e)}), 500
 
 @app.route('/callback-url', methods=['POST'])
 def callback_url():
@@ -958,9 +1056,39 @@ def callback_url():
 
     return jsonify({"status": payment_status}), 200
 
-@app.route('/verify-payment/<payment_id>', methods=['GET'])
-def verify_payment(payment_id):
-    return Mpesa().get(payment_id)
+
+@app.route('/confirm-payment', methods=['POST'])
+def confirm_payment():
+    data = request.json
+    invoice_id = data.get('invoice_id')
+    
+    if not invoice_id:
+        return jsonify({'error': 'Invoice ID is required.'}), 400
+    
+    try:
+        service = APIService(
+            token='ISSecretKey_test_997023a2-63e1-4864-aa10-3268377569be',
+            publishable_key='ISPubKey_test_93dd9667-9e6e-4e4a-99b4-dc9795a392a9',
+            test=True
+        )
+        status_response = service.collect.status(invoice_id=invoice_id)
+        status = status_response.get('invoice', {}).get('state')
+        
+        if status == 'SUCCESSFUL':
+            # Update ticket status and associate with user
+            # Assuming the data includes user and ticket details
+            user_id = data.get('user_id')
+            ticket_id = data.get('ticket_id')
+            
+            # Fetch and update the ticket and user in the database
+            # (Add your database update logic here)
+            
+            return jsonify({'message': 'Payment confirmed and ticket booked.'}), 200
+        else:
+            return jsonify({'error': 'Payment not completed successfully.'}), 400
+        
+    except Exception as e:
+        return jsonify({'error': 'Failed to confirm payment.', 'details': str(e)}), 500
 
 
 @app.route('/download-receipt/<int:payment_id>', methods=['GET'])
@@ -1059,8 +1187,60 @@ class BookedEventResource(Resource):
         db.session.commit()
         return {'message': 'Event deleted successfully'}
 
+class GenerateICS(Resource):
+    def get(self, ticket_id):
+        # Fetch the ticket from the database
+        ticket = Ticket.query.filter_by(id=ticket_id).first()
+
+        if not ticket:
+            return jsonify({"message": "Ticket not found"}), 404
+
+        # Fetch the associated event
+        event = Event.query.filter_by(id=ticket.event_id).first()
+
+        if not event:
+            return jsonify({"message": "Event not found"}), 404
+
+        # Create a new calendar and event
+        c = Calendar()
+        e = Event()
+        e.name = event.title
+        e.begin = event.start_time  # Ensure this is a datetime object
+        e.description = f"Event: {event.title}\nTicket ID: {ticket_id}"
+        e.location = event.location
+
+        # Add event to calendar
+        c.events.add(e)
+
+        # Write the calendar data to a temporary in-memory buffer
+        file_content = BytesIO()
+        file_content.write(c.serialize().encode("utf-8"))  # Use `serialize()` to get the calendar data
+        file_content.seek(0)  # Reset the buffer pointer to the beginning
+
+        # Define the file name for download
+        file_name = f"{event.title.replace(' ', '_')}.ics"
+
+        # Send the file as an attachment
+        return send_file(file_content, as_attachment=True, download_name=file_name, mimetype='text/calendar')
+# Create a new resource for updating ticket status
+class UpdateTicketStatus(Resource):
+    def put(self, ticket_id):
+        data = request.get_json()
+        ticket = Ticket.query.get(ticket_id)
+        
+        if not ticket:
+            return {'message': 'Ticket not found'}, 404
+        
+        if 'status' in data:
+            ticket.status = data['status']
+            db.session.commit()
+            return {'message': 'Ticket status updated successfully'}, 200
+        else:
+            return {'message': 'Status not provided'}, 400
 # API end points
+api.add_resource(UpdateTicketStatus, '/update-ticket-status/<int:ticket_id>')
 api.add_resource(Mpesa, '/mpesa', '/mpesa/<string:payment_id>')
+api.add_resource(GenerateICS, '/generate_ics/<int:ticket_id>')
 api.add_resource(EventAttendeesResource, '/events/<int:event_id>/attendees')
 api.add_resource(Transaction, '/payments')
 api.add_resource(CategoryResource, '/categories', '/categories/<int:category_id>')
