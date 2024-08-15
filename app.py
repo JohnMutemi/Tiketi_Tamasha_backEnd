@@ -9,6 +9,7 @@ from werkzeug.exceptions import NotFound
 from datetime import timedelta, datetime
 from threading import Timer
 from dotenv import load_dotenv
+from models import db, User, Event, Category, Payment, Ticket, RevokedToken, BookedEvent
 import jwt
 from jwt.exceptions import InvalidTokenError
 from utils import generate_otp, send_otp_to_email
@@ -28,19 +29,36 @@ otp.init_app(current_app)
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]}})
+           # ------------------------------------------------------------------------
+if os.getenv('FLASK_ENV') == 'production':
+    app.config.from_object('config.ProductionConfig')
+elif os.getenv('FLASK_ENV') == 'testing':
+    app.config.from_object('config.TestingConfig')
+else:
+    app.config.from_object('config.DevelopmentConfig')
 
-# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URI') 
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config["JWT_SECRET_KEY"] = "fsbdgfnhgvjnvhmvh" + str(random.randint(1, 1000000000000))
-app.config["JWT_ACCESS_TOKEN_EXPIRES"] = timedelta(days=1)
-app.config["SECRET_KEY"] = "JKSRVHJVFBSRDFV" + str(random.randint(1, 1000000000000))
-app.json.compact = False
+if os.getenv('FLASK_ENV') == 'production':
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DB_INTERNAL_URL")
+else:
+    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DB_EXTERNAL_URL")
+
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY")
+
+db.init_app(app)
+
+with app.app_context():
+   
+    db.create_all()
+
+
 api = Api(app)
 
 
-from models import db, User, Event, Category, Payment, Ticket, RevokedToken, BookedEvent
+
+          # ------------------------------------------------------------------------
+
 db.init_app(app)
 jwt = JWTManager(app)
 migrate=Migrate(app, db)

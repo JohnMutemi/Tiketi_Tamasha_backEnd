@@ -6,10 +6,15 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy.orm import validates
 from sqlalchemy.orm import validates, relationship, backref
 
-metadata = MetaData(naming_convention={
-    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s"
-})
+convention = {
+    "ix": "ix_%(column_0_label)s",
+    "uq": "uq_%(table_name)s_%(column_0_name)s",
+    "ck": "ck_%(table_name)s_%(constraint_name)s",
+    "fk": "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
+    "pk": "pk_%(table_name)s"
+}
 
+metadata = MetaData(naming_convention=convention)
 db = SQLAlchemy(metadata=metadata)
 
 class User(db.Model, SerializerMixin):
