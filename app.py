@@ -14,7 +14,6 @@ from jwt.exceptions import InvalidTokenError
 from utils import generate_otp, send_otp_to_email
 from datetime import datetime, timedelta
 from sqlalchemy.exc import SQLAlchemyError
-from flask_sqlalchemy import SQLAlchemy
 import random, os, requests
 from flask_otp import OTP
 from sqlalchemy.orm import joinedload
@@ -47,7 +46,6 @@ from models import db, User, Event, Category, Payment, Ticket, RevokedToken, Boo
 db.init_app(app)
 jwt = JWTManager(app)
 migrate=Migrate(app, db)
-db = SQLAlchemy(app)
 
 @app.errorhandler(NotFound)
 def handle_not_found(e):
