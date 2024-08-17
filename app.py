@@ -9,12 +9,12 @@ from werkzeug.exceptions import NotFound
 from datetime import timedelta, datetime
 from threading import Timer
 from dotenv import load_dotenv
-from models import db, User, Event, Category, Payment, Ticket, RevokedToken, BookedEvent
 import jwt
 from jwt.exceptions import InvalidTokenError
 from utils import generate_otp, send_otp_to_email
 from datetime import datetime, timedelta
 from sqlalchemy.exc import SQLAlchemyError
+from flask_sqlalchemy import SQLAlchemy
 import random, os, requests
 from flask_otp import OTP
 from sqlalchemy.orm import joinedload
@@ -23,46 +23,31 @@ from io import BytesIO
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from ics import Calendar, Event
+from config import Config
+from dotenv import load_dotenv
+load_dotenv()
 
 otp = OTP()
 otp.init_app(current_app)
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]}})
-           # ------------------------------------------------------------------------
-if os.getenv('FLASK_ENV') == 'production':
-    app.config.from_object('config.ProductionConfig')
-elif os.getenv('FLASK_ENV') == 'testing':
-    app.config.from_object('config.TestingConfig')
-else:
-    app.config.from_object('config.DevelopmentConfig')
+
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-
-if os.getenv('FLASK_ENV') == 'production':
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DB_INTERNAL_URL")
-else:
-    app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DB_EXTERNAL_URL")
-
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY")
-
-db.init_app(app)
-
-with app.app_context():
-   
-    db.create_all()
+# app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
+app = Flask(__name__)
+app.config.from_object(Config)
 
 
+app.json.compact = False
 api = Api(app)
 
-
-
-          # ------------------------------------------------------------------------
-
+from models import db, User, Event, Category, Payment, Ticket, RevokedToken, BookedEvent
 db.init_app(app)
 jwt = JWTManager(app)
 migrate=Migrate(app, db)
-
+db = SQLAlchemy(app)
 
 @app.errorhandler(NotFound)
 def handle_not_found(e):
@@ -399,6 +384,7 @@ class EventsResource(Resource):
                 total_tickets=int(data['total_tickets']),
                 remaining_tickets=int(data['remaining_tickets']),
                 image_url=data['image_url'],
+                ticket_Price=int(data['ticket_Price']),
                 organizer_id=current_user['user_id'] if current_user_role == 'event_organizer' else None
             )
             db.session.add(event)
@@ -694,13 +680,16 @@ class CategoryResource(Resource):
     @jwt_required()
     def post(self):
         # Check if the user is an admin
+        print("REQUEST REACHEd")
         current_user = get_jwt_identity()
+        print("Current user",current_user)
         if current_user.get('role') != 'admin':  # Adjust based on how role is stored in JWT
             return {'message': 'Admin access required'}, 403
 
         # Handle JSON data for creating a new category
-        data = request.get_json()
-        name = data.get('name')
+        
+        name = request.form.get('name')
+        print("---- name is", name)
 
         if not name:
             return {'message': 'Name is required'}, 400
@@ -719,8 +708,8 @@ class CategoryResource(Resource):
 
         # Handle JSON data for updating an existing category
         category = Category.query.get_or_404(category_id)
-        data = request.get_json()
-        name = data.get('name')
+
+        name = request.form.get('name')
 
         if not name:
             return {'message': 'Name is required'}, 400
@@ -818,7 +807,9 @@ class BookTicket(Resource):
             return jsonify({'message': 'Booking successful'}), 200
         
         return jsonify({'error': 'Unauthorized to book tickets'}), 403
-    
+
+
+
 class AdminDashboard(Resource):
     @jwt_required()
     def get(self, user_id=None, event_id=None, category_id=None, transaction_id=None):
@@ -1007,48 +998,9 @@ class Mpesa(Resource):
     
 
 # Define the routes
+@app.route('/initiate-transaction', methods=['POST'])
 def initiate_transaction():
-    data = request.json
-    phone_number = data.get('phone_number')
-    amount = data.get('amount')
-    email = data.get('email')
-    ticket_id = data.get('ticket_id')
-    user_id = data.get('user_id')
-    
-    if not phone_number or not amount or not ticket_id or not user_id:
-        return jsonify({'error': 'Phone number, amount, ticket_id, and user_id are required.'}), 400
-
-    try:
-        service = APIService(
-            token='ISSecretKey_test_997023a2-63e1-4864-aa10-3268377569be',
-            publishable_key='ISPubKey_test_93dd9667-9e6e-4e4a-99b4-dc9795a392a9',
-            test=True
-        )
-        
-        # Initiate the payment
-        response = service.collect.mpesa_stk_push(
-            phone_number=phone_number,
-            email=email,
-            amount=amount,
-            narrative="Ticket Payment"
-        )
-        
-        invoice_id = response.get('invoice', {}).get('invoice_id')
-        if not invoice_id:
-            return jsonify({'error': 'Failed to initiate payment.'}), 500
-        
-        # Update ticket status to "pending"
-        # (Add your database update logic here)
-        # Example (assuming SQLAlchemy):
-        ticket = Ticket.query.filter_by(id=ticket_id).first()
-        if ticket:
-            ticket.status = 'pending'
-            db.session.commit()
-
-        return jsonify({'message': 'Transaction initiated and ticket status set to pending.', 'data': response}), 201
-
-    except Exception as e:
-        return jsonify({'error': 'Failed to initiate payment.', 'details': str(e)}), 500
+    return Mpesa().post()
 
 @app.route('/callback-url', methods=['POST'])
 def callback_url():
@@ -1065,7 +1017,6 @@ def callback_url():
         db.session.commit()
 
     return jsonify({"status": payment_status}), 200
-
 
 @app.route('/confirm-payment', methods=['POST'])
 def confirm_payment():
@@ -1085,21 +1036,22 @@ def confirm_payment():
         status = status_response.get('invoice', {}).get('state')
         
         if status == 'SUCCESSFUL':
-            # Update ticket status and associate with user
-            # Assuming the data includes user and ticket details
             user_id = data.get('user_id')
             ticket_id = data.get('ticket_id')
             
             # Fetch and update the ticket and user in the database
-            # (Add your database update logic here)
+            ticket = Ticket.query.filter_by(id=ticket_id).first()
+            if ticket:
+                ticket.status = 'booked'
+                db.session.commit()
             
             return jsonify({'message': 'Payment confirmed and ticket booked.'}), 200
         else:
             return jsonify({'error': 'Payment not completed successfully.'}), 400
         
     except Exception as e:
+        app.logger.error(f"Error confirming payment: {e}")
         return jsonify({'error': 'Failed to confirm payment.', 'details': str(e)}), 500
-
 
 @app.route('/download-receipt/<int:payment_id>', methods=['GET'])
 def download_receipt(payment_id):
@@ -1279,4 +1231,12 @@ api.add_resource(VerifyOTP, '/verify-otp')
 api.add_resource(BookedEventResource, '/api/booked-events', '/api/booked-events/<int:event_id>')
 
 if __name__ == '__main__':
-    app.run(port=5555, debug=True)
+    # For production
+    if os.getenv('FLASK_ENV') == 'production':
+
+       app.run(host='0.0.0.0', port=os.getenv('FLASK_RUN_PORT', 5555))
+
+        
+    # For development
+    else:
+        app.run(port=5555, debug=True)

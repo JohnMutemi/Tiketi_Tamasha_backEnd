@@ -12,7 +12,7 @@ USD_TO_KSH_CONVERSION_RATE = 145
 
 # Define price ranges for different ticket types in USD
 TICKET_PRICE_RANGES = {
-    'Early Booking': (10.0, 30.0),  # $10 to $30
+    'Early Booking': (10.0, 30.0),   # $10 to $30
     'Regular': (30.0, 60.0),        # $30 to $60
     'VIP': (60.0, 100.0)            # $60 to $100
 }
