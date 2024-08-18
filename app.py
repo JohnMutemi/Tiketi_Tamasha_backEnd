@@ -31,16 +31,24 @@ otp.init_app(current_app)
 
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]}})
-
+api = Api(app)
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
 # app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///app.db'
-app = Flask(__name__)
+
+# Configure the app using the Config class
 app.config.from_object(Config)
 
+# Set up SQLAlchemy database URI
+database_url = os.getenv('DATABASE_URL')
+if database_url:
+    app.config['SQLALCHEMY_DATABASE_URI'] = database_url
+else:
+    raise ValueError("DATABASE_URL is not set")
 
+# Ensure JSON responses are not compact
 app.json.compact = False
-api = Api(app)
 
 from models import db, User, Event, Category, Payment, Ticket, RevokedToken, BookedEvent
 db.init_app(app)
@@ -1228,13 +1236,9 @@ api.add_resource(EventsResource, '/events','/events/<int:event_id>')
 api.add_resource(VerifyOTP, '/verify-otp')
 api.add_resource(BookedEventResource, '/api/booked-events', '/api/booked-events/<int:event_id>')
 
+#
 if __name__ == '__main__':
-    # For production
-    if os.getenv('FLASK_ENV') == 'production':
+    app.run(port=int(os.getenv('FLASK_RUN_PORT', 5555)))
 
-       app.run(host='0.0.0.0', port=os.getenv('FLASK_RUN_PORT', 5555))
 
-        
-    # For development
-    else:
-        app.run(port=5555, debug=True)
+
