@@ -355,7 +355,7 @@ class EventsResource(Resource):
                 'end_time': event.end_time.isoformat(),
                 'total_tickets': event.total_tickets,
                 'remaining_tickets': event.remaining_tickets,
-                'price':event.price,
+                # 'price':event.price,
                 'image_url': event.image_url,
                 'organizer_id':event.organizer_id
             })
@@ -391,7 +391,7 @@ class EventsResource(Resource):
                 total_tickets=int(data['total_tickets']),
                 remaining_tickets=int(data['remaining_tickets']),
                 image_url=data['image_url'],
-                price=int(data['price']),
+                # price=int(data['price']),
                 organizer_id=current_user['user_id'] if current_user_role == 'event_organizer' else None
             )
             db.session.add(event)
