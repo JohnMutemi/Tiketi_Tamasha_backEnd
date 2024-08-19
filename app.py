@@ -355,6 +355,7 @@ class EventsResource(Resource):
                 'end_time': event.end_time.isoformat(),
                 'total_tickets': event.total_tickets,
                 'remaining_tickets': event.remaining_tickets,
+                'price':event.price,
                 'image_url': event.image_url,
                 'organizer_id':event.organizer_id
             })
@@ -390,7 +391,7 @@ class EventsResource(Resource):
                 total_tickets=int(data['total_tickets']),
                 remaining_tickets=int(data['remaining_tickets']),
                 image_url=data['image_url'],
-                ticket_Price=int(data['ticket_Price']),
+                price=int(data['price']),
                 organizer_id=current_user['user_id'] if current_user_role == 'event_organizer' else None
             )
             db.session.add(event)
@@ -738,15 +739,22 @@ class CategoryResource(Resource):
         return '', 204
     
 class TicketResource(Resource):
+    @jwt_required()
     def get(self, ticket_id=None):
-        # Retrieve the user_id from the query parameters
-        user_id = request.args.get('user_id')
-        
+        current_user = get_jwt_identity()
+        user_role = current_user.get('role')
+        user_id = current_user.get('user_id')
+
+        if user_role not in ['admin', 'event_organizer']:
+            return {'error': 'Access forbidden'}, 403
+
         if ticket_id:
-            # Retrieve a specific ticket by ID
             ticket = Ticket.query.get(ticket_id)
             if ticket:
-                # Fetch the event details if the ticket exists
+                # Admins and event organizers can view tickets
+                if user_role == 'event_organizer' and ticket.user_id != user_id:
+                    return {'error': 'Access forbidden'}, 403
+
                 event = Event.query.get(ticket.event_id)
                 return {
                     'id': ticket.id,
@@ -764,13 +772,13 @@ class TicketResource(Resource):
                 }, 200
             return {'error': 'Ticket not found'}, 404
 
-        # List all tickets or filter by user_id
-        if user_id:
+        if user_role == 'event_organizer':
+            # Event organizers can only see tickets for their events
             tickets = Ticket.query.filter_by(user_id=user_id).all()
         else:
+            # Admins can see all tickets
             tickets = Ticket.query.all()
 
-        # Fetch event details for each ticket
         return [
             {
                 'id': ticket.id,
@@ -786,6 +794,70 @@ class TicketResource(Resource):
             }
             for ticket in tickets
         ], 200
+
+    @jwt_required()
+    def post(self):
+        current_user = get_jwt_identity()
+        user_role = current_user.get('role')
+
+        if user_role not in ['admin', 'event_organizer']:
+            return {'error': 'Access forbidden'}, 403
+
+        data = request.get_json()
+        new_ticket = Ticket(
+            event_id=data['event_id'],
+            user_id=current_user['user_id'],
+            ticket_type=data['ticket_type'],
+            price=data['price'],
+            quantity=data['quantity'],
+            status=data['status']
+        )
+        db.session.add(new_ticket)
+        db.session.commit()
+        return {'message': 'Ticket created', 'ticket': new_ticket.id}, 201
+
+    @jwt_required()
+    def patch(self, ticket_id):
+        current_user = get_jwt_identity()
+        user_role = current_user.get('role')
+
+        if user_role not in ['admin', 'event_organizer']:
+            return {'error': 'Access forbidden'}, 403
+
+        ticket = Ticket.query.get(ticket_id)
+        if not ticket:
+            return {'error': 'Ticket not found'}, 404
+
+        if user_role == 'event_organizer' and ticket.user_id != current_user['user_id']:
+            return {'error': 'Access forbidden'}, 403
+
+        data = request.get_json()
+        ticket.event_id = data.get('event_id', ticket.event_id)
+        ticket.ticket_type = data.get('ticket_type', ticket.ticket_type)
+        ticket.price = data.get('price', ticket.price)
+        ticket.quantity = data.get('quantity', ticket.quantity)
+        ticket.status = data.get('status', ticket.status)
+        db.session.commit()
+        return {'message': 'Ticket updated'}, 200
+
+    @jwt_required()
+    def delete(self, ticket_id):
+        current_user = get_jwt_identity()
+        user_role = current_user.get('role')
+
+        if user_role not in ['admin', 'event_organizer']:
+            return {'error': 'Access forbidden'}, 403
+
+        ticket = Ticket.query.get(ticket_id)
+        if not ticket:
+            return {'error': 'Ticket not found'}, 404
+
+        if user_role == 'event_organizer' and ticket.user_id != current_user['user_id']:
+            return {'error': 'Access forbidden'}, 403
+
+        db.session.delete(ticket)
+        db.session.commit()
+        return {'message': 'Ticket deleted'}, 200
     
 class UserRole(Resource):
     def get(self):
