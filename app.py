@@ -739,22 +739,12 @@ class CategoryResource(Resource):
         return '', 204
     
 class TicketResource(Resource):
-    @jwt_required()
+    
     def get(self, ticket_id=None):
-        current_user = get_jwt_identity()
-        user_role = current_user.get('role')
-        user_id = current_user.get('user_id')
-
-        if user_role not in ['admin', 'event_organizer']:
-            return {'error': 'Access forbidden'}, 403
-
+        # If ticket_id is provided, retrieve a specific ticket
         if ticket_id:
             ticket = Ticket.query.get(ticket_id)
             if ticket:
-                # Admins and event organizers can view tickets
-                if user_role == 'event_organizer' and ticket.user_id != user_id:
-                    return {'error': 'Access forbidden'}, 403
-
                 event = Event.query.get(ticket.event_id)
                 return {
                     'id': ticket.id,
@@ -771,6 +761,11 @@ class TicketResource(Resource):
                     }
                 }, 200
             return {'error': 'Ticket not found'}, 404
+
+        # Retrieve tickets based on the user role
+        current_user = get_jwt_identity() if 'Authorization' in request.headers else None
+        user_role = current_user.get('role') if current_user else None
+        user_id = current_user.get('user_id') if current_user else None
 
         if user_role == 'event_organizer':
             # Event organizers can only see tickets for their events
